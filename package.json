@@ -1,0 +1,22 @@
+{
+  "name": "vk-linear-cut-mini-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "verify:optimizer": "node ./scripts/verify-optimizer.mjs"
+  },
+  "dependencies": {
+    "@vkontakte/vk-bridge": "latest",
+    "@vkontakte/vk-bridge-react": "latest",
+    "@vkontakte/vkui": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "vite": "latest"
+  }
+}

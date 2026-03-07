@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.vite/
+
+# Local IDE and logs
+.DS_Store
+Thumbs.db
+*.log
+
+# Legacy Python desktop build artifacts
+project1/build/
+project1/dist/
+project1/__pycache__/
+project1/.qtcreator/
