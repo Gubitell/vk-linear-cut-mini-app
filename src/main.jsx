@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AdaptivityProvider, AppRoot, ConfigProvider } from "@vkontakte/vkui";
 import { useAdaptivity, useAppearance, useInsets } from "@vkontakte/vk-bridge-react";
