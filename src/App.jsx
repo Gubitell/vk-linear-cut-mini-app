@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Button,
@@ -24,7 +24,7 @@ import {
 } from "@vkontakte/vkui";
 import { runTapticImpactOccurred } from "@vkontakte/vk-bridge-react";
 import { BoardScheme } from "./components/BoardScheme.jsx";
-import { DETAIL_PRESETS, MATERIAL_PRESETS } from "./data/presets.js";
+import { MATERIAL_PRESETS } from "./data/presets.js";
 import { calculateCutting, normalizeDetails, summarizeResult } from "./lib/optimizer.js";
 import { loadHistory, saveHistoryEntry } from "./lib/storage.js";
 import { copyText, getUserInfoSafe, setSwipeSettings } from "./lib/vk.js";
@@ -33,7 +33,9 @@ const EMPTY_MATERIAL = {
   name: "Новый расчёт",
   length: "6000",
   cutWidth: "3",
-  cost: "450"
+  cost: "450",
+  lengthUnit: "мм",
+  currency: "руб."
 };
 
 const EMPTY_DETAIL_FORM = {
@@ -74,23 +76,55 @@ function formatDate(value) {
   });
 }
 
+function getLengthUnit(material) {
+  return material.lengthUnit?.trim() || "мм";
+}
+
+function getCurrency(material) {
+  return material.currency?.trim() || "руб.";
+}
+
+function formatMeasure(value, unit) {
+  return `${formatNumber(value)} ${unit}`;
+}
+
+function formatMoney(value, currency) {
+  return `${formatNumber(value)} ${currency}`;
+}
+
+function normalizeMaterialState(material) {
+  return {
+    name: material?.name ?? "Новый расчёт",
+    length: String(material?.length ?? EMPTY_MATERIAL.length),
+    cutWidth: String(material?.cutWidth ?? EMPTY_MATERIAL.cutWidth),
+    cost: material?.cost === null || material?.cost === undefined ? "" : String(material.cost),
+    lengthUnit: getLengthUnit(material ?? EMPTY_MATERIAL),
+    currency: getCurrency(material ?? EMPTY_MATERIAL)
+  };
+}
+
 function sanitizeMaterial(material) {
   return {
     name: material.name.trim() || "Новый расчёт",
     length: Number(material.length),
     cutWidth: Number(material.cutWidth || 0),
-    cost: material.cost === "" ? null : Number(material.cost)
+    cost: material.cost === "" ? null : Number(material.cost),
+    lengthUnit: getLengthUnit(material),
+    currency: getCurrency(material)
   };
 }
 
-function statsRows(result) {
+function statsRows(result, material) {
+  const lengthUnit = getLengthUnit(material);
+  const currency = getCurrency(material);
+
   return [
     ["Заготовок", `${result.boardCount} шт.`],
-    ["Материала", `${formatNumber(result.totalMaterialUsed)} мм`],
+    ["Материала", formatMeasure(result.totalMaterialUsed, lengthUnit)],
     ["Полезный выход", `${result.benefitPercent}%`],
-    ["Отходы", `${result.wastePercent}% (${formatNumber(result.totalWaste)} мм)`],
+    ["Отходы", `${result.wastePercent}% (${formatMeasure(result.totalWaste, lengthUnit)})`],
     ["Резов", `${result.cutsCount}`],
-    ["Стоимость", result.cost === null ? "не указана" : `${formatNumber(result.cost)} руб.`]
+    ["Стоимость", result.cost === null ? "не указана" : formatMoney(result.cost, currency)]
   ];
 }
 
@@ -131,14 +165,7 @@ export default function App() {
   }
 
   function resetCalculation(presetMaterial = null, presetDetails = []) {
-    const nextMaterial = presetMaterial
-      ? {
-          name: presetMaterial.name,
-          length: String(presetMaterial.length),
-          cutWidth: String(presetMaterial.cutWidth),
-          cost: presetMaterial.cost ? String(presetMaterial.cost) : ""
-        }
-      : EMPTY_MATERIAL;
+    const nextMaterial = normalizeMaterialState(presetMaterial ?? EMPTY_MATERIAL);
 
     setMaterial(nextMaterial);
     setDetails(presetDetails);
@@ -148,15 +175,11 @@ export default function App() {
     setHistoryStack(["home", "material"]);
   }
 
-  function applyDetailPreset(preset) {
-    setDetails(preset.details);
-    setStatusText(`Загружен шаблон: ${preset.title}`);
-  }
-
   function appendDetail() {
     const length = Number(detailForm.length);
     const quantity = Number(detailForm.quantity);
     const materialLength = Number(material.length);
+    const lengthUnit = getLengthUnit(material);
 
     if (!Number.isFinite(length) || length <= 0) {
       setStatusText("Длина детали должна быть больше 0");
@@ -175,7 +198,7 @@ export default function App() {
 
     setDetails((prev) => [...prev, { length, quantity }]);
     setDetailForm(EMPTY_DETAIL_FORM);
-    setStatusText(`Добавлена деталь ${length} мм × ${quantity}`);
+    setStatusText(`Добавлена деталь ${length} ${lengthUnit} × ${quantity}`);
   }
 
   function removeDetail(index) {
@@ -184,7 +207,13 @@ export default function App() {
 
   function runCalculation() {
     const nextMaterial = sanitizeMaterial(material);
-    const calculation = calculateCutting(nextMaterial.length, nextMaterial.cutWidth, sortedDetails, nextMaterial.cost ?? 0);
+    const calculation = calculateCutting(
+      nextMaterial.length,
+      nextMaterial.cutWidth,
+      sortedDetails,
+      nextMaterial.cost ?? 0,
+      nextMaterial.lengthUnit
+    );
 
     if (calculation.error) {
       setStatusText(calculation.error);
@@ -195,7 +224,9 @@ export default function App() {
       name: nextMaterial.name,
       length: String(nextMaterial.length),
       cutWidth: String(nextMaterial.cutWidth),
-      cost: nextMaterial.cost === null ? "" : String(nextMaterial.cost)
+      cost: nextMaterial.cost === null ? "" : String(nextMaterial.cost),
+      lengthUnit: nextMaterial.lengthUnit,
+      currency: nextMaterial.currency
     });
     setResult(calculation);
     setStatusText("Расчёт готов");
@@ -228,12 +259,7 @@ export default function App() {
   }
 
   function openHistoryEntry(item) {
-    setMaterial({
-      name: item.material.name ?? "История",
-      length: String(item.material.length),
-      cutWidth: String(item.material.cutWidth),
-      cost: item.material.cost === null ? "" : String(item.material.cost)
-    });
+    setMaterial(normalizeMaterialState(item.material));
     setDetails(item.details);
     setResult(item.result);
     setStatusText(`Открыт расчёт: ${item.projectName}`);
@@ -253,8 +279,7 @@ export default function App() {
                   <Badge mode="prominent">FFD</Badge>
                 </div>
                 <Text className="muted-text">
-                  Расчёт заготовок, пропила, отходов и стоимости. Алгоритм перенесён из твоего desktop-проекта на
-                  Python/QML в React + VKUI + VK Bridge.
+                  Расчёт заготовок, пропила, отходов и стоимости с сохранением результатов в истории.
                 </Text>
                 <div className="hero__actions">
                   <Button size="l" stretched onClick={() => resetCalculation()}>
@@ -293,22 +318,6 @@ export default function App() {
                 ))}
               </CardGrid>
             </Group>
-
-            <Group header={<Header>Шаблоны деталей</Header>}>
-              {DETAIL_PRESETS.map((preset) => (
-                <SimpleCell
-                  key={preset.id}
-                  subtitle={`${preset.details.length} позиций`}
-                  after={
-                    <Button size="s" mode="secondary" onClick={() => resetCalculation(null, preset.details)}>
-                      Открыть
-                    </Button>
-                  }
-                >
-                  {preset.title}
-                </SimpleCell>
-              ))}
-            </Group>
           </Panel>
 
           <Panel id="material">
@@ -321,26 +330,40 @@ export default function App() {
                   placeholder="Например: Балкон, кухня, профиль"
                 />
               </FormItem>
-              <FormItem top="Длина материала, мм">
+              <FormItem top={`Длина материала, ${getLengthUnit(material)}`}>
                 <Input
                   type="number"
                   value={material.length}
                   onChange={(event) => setMaterial((prev) => ({ ...prev, length: event.target.value }))}
                 />
               </FormItem>
-              <FormItem top="Толщина реза, мм">
+              <FormItem top={`Толщина реза, ${getLengthUnit(material)}`}>
                 <Input
                   type="number"
                   value={material.cutWidth}
                   onChange={(event) => setMaterial((prev) => ({ ...prev, cutWidth: event.target.value }))}
                 />
               </FormItem>
-              <FormItem top="Стоимость одной заготовки, руб.">
+              <FormItem top="Единица длины">
+                <Input
+                  value={material.lengthUnit}
+                  onChange={(event) => setMaterial((prev) => ({ ...prev, lengthUnit: event.target.value }))}
+                  placeholder="мм, см, м, in"
+                />
+              </FormItem>
+              <FormItem top={`Стоимость одной заготовки, ${getCurrency(material)}`}>
                 <Input
                   type="number"
                   value={material.cost}
                   onChange={(event) => setMaterial((prev) => ({ ...prev, cost: event.target.value }))}
                   placeholder="Опционально"
+                />
+              </FormItem>
+              <FormItem top="Обозначение валюты">
+                <Input
+                  value={material.currency}
+                  onChange={(event) => setMaterial((prev) => ({ ...prev, currency: event.target.value }))}
+                  placeholder="руб., $, EUR"
                 />
               </FormItem>
               <Div>
@@ -354,7 +377,7 @@ export default function App() {
           <Panel id="details">
             <PanelHeader before={<PanelHeaderBack onClick={goBack} />}>Детали</PanelHeader>
             <Group header={<Header>Добавить деталь</Header>}>
-              <FormItem top="Длина детали, мм">
+              <FormItem top={`Длина детали, ${getLengthUnit(material)}`}>
                 <Input
                   type="number"
                   value={detailForm.length}
@@ -381,37 +404,21 @@ export default function App() {
               </Div>
             </Group>
 
-            <Group header={<Header>Быстрые наборы</Header>}>
-              {DETAIL_PRESETS.map((preset) => (
-                <SimpleCell
-                  key={preset.id}
-                  subtitle={preset.details.map((item) => `${item.length}x${item.quantity}`).join(", ")}
-                  after={
-                    <Button size="s" mode="secondary" onClick={() => applyDetailPreset(preset)}>
-                      Загрузить
-                    </Button>
-                  }
-                >
-                  {preset.title}
-                </SimpleCell>
-              ))}
-            </Group>
-
             <Group header={<Header>Текущий список</Header>}>
               {sortedDetails.length === 0 ? (
-                <Placeholder>Список пуст. Добавь детали вручную или подгрузи шаблон.</Placeholder>
+                <Placeholder>Список пуст. Добавь детали вручную.</Placeholder>
               ) : (
                 sortedDetails.map((detail, index) => (
                   <SimpleCell
                     key={`${detail.length}-${detail.quantity}-${index}`}
-                    subtitle={`Суммарно ${formatNumber(detail.length * detail.quantity)} мм`}
+                    subtitle={`Суммарно ${formatMeasure(detail.length * detail.quantity, getLengthUnit(material))}`}
                     after={
                       <Button size="s" mode="tertiary" appearance="negative" onClick={() => removeDetail(index)}>
                         Удалить
                       </Button>
                     }
                   >
-                    {detail.length} мм × {detail.quantity} шт.
+                    {detail.length} {getLengthUnit(material)} × {detail.quantity} шт.
                   </SimpleCell>
                 ))
               )}
@@ -428,11 +435,12 @@ export default function App() {
                       <Div>
                         <Title level="3">{material.name || "Новый расчёт"}</Title>
                         <Text className="muted-text">
-                          {result.materialLength} мм • пропил {material.cutWidth || 0} мм
+                          {formatMeasure(result.materialLength, getLengthUnit(material))} • пропил{" "}
+                          {formatMeasure(material.cutWidth || 0, getLengthUnit(material))}
                         </Text>
                         <Separator className="top-gap" />
                         <div className="stats-grid">
-                          {statsRows(result).map(([label, value]) => (
+                          {statsRows(result, material).map(([label, value]) => (
                             <div className="stats-grid__row" key={label}>
                               <span>{label}</span>
                               <strong>{value}</strong>
@@ -457,7 +465,7 @@ export default function App() {
                 <Group header={<Header>Детали</Header>}>
                   {result.details.map((detail) => (
                     <SimpleCell key={`${detail.length}-${detail.quantity}`}>
-                      {detail.length} мм × {detail.quantity} шт.
+                      {detail.length} {getLengthUnit(material)} × {detail.quantity} шт.
                     </SimpleCell>
                   ))}
                 </Group>
@@ -469,6 +477,7 @@ export default function App() {
                       board={board}
                       materialLength={result.materialLength}
                       cutWidth={Number(material.cutWidth || 0)}
+                      lengthUnit={getLengthUnit(material)}
                     />
                   ))}
                 </Group>
@@ -489,7 +498,7 @@ export default function App() {
                 historyItems.map((item) => (
                   <SimpleCell
                     key={item.id}
-                    subtitle={`${formatDate(item.savedAt)} • ${item.result.boardCount} заготовок • ${item.result.wastePercent}% отходов`}
+                    subtitle={`${formatDate(item.savedAt)} • ${item.result.boardCount} заготовок • ${item.result.wastePercent}% отходов • ${getLengthUnit(item.material)}`}
                     after={
                       <Button size="s" mode="secondary" onClick={() => openHistoryEntry(item)}>
                         Открыть

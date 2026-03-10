@@ -21,7 +21,7 @@ export function normalizeDetails(details) {
     .filter((detail) => detail.length > 0 && detail.quantity > 0);
 }
 
-export function calculateCutting(materialLength, cutWidth, details, materialCost = 0) {
+export function calculateCutting(materialLength, cutWidth, details, materialCost = 0, lengthUnit = "мм") {
   const normalizedMaterialLength = toNumber(materialLength);
   const normalizedCutWidth = Math.max(0, toNumber(cutWidth));
   const normalizedMaterialCost = Math.max(0, toNumber(materialCost));
@@ -47,7 +47,7 @@ export function calculateCutting(materialLength, cutWidth, details, materialCost
 
     if (length > normalizedMaterialLength) {
       return {
-        error: `Деталь длиной ${length} мм превышает длину материала ${normalizedMaterialLength} мм`
+        error: `Деталь длиной ${length} ${lengthUnit} превышает длину материала ${normalizedMaterialLength} ${lengthUnit}`
       };
     }
 
@@ -128,17 +128,19 @@ export function calculateCutting(materialLength, cutWidth, details, materialCost
 }
 
 export function summarizeResult(material, result) {
+  const lengthUnit = material.lengthUnit || "мм";
+  const currency = material.currency || "руб.";
   const parts = [
-    `Материал: ${material.length} мм`,
-    `Пропил: ${material.cutWidth} мм`,
+    `Материал: ${material.length} ${lengthUnit}`,
+    `Пропил: ${material.cutWidth} ${lengthUnit}`,
     `Заготовок: ${result.boardCount}`,
     `Польза: ${result.benefitPercent}%`,
-    `Отходы: ${result.wastePercent}% (${result.totalWaste} мм)`,
+    `Отходы: ${result.wastePercent}% (${result.totalWaste} ${lengthUnit})`,
     `Резов: ${result.cutsCount}`
   ];
 
   if (result.cost !== null) {
-    parts.push(`Стоимость: ${result.cost}`);
+    parts.push(`Стоимость: ${result.cost} ${currency}`);
   }
 
   return parts.join("\n");

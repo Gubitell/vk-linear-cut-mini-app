@@ -1,7 +1,8 @@
+import React from "react";
 import { Caption, Div, Footnote, Text } from "@vkontakte/vkui";
 
-function formatLength(value) {
-  return `${Number(value).toLocaleString("ru-RU")} мм`;
+function formatLength(value, unit) {
+  return `${Number(value).toLocaleString("ru-RU")} ${unit}`;
 }
 
 function getSegmentColor(index) {
@@ -9,7 +10,7 @@ function getSegmentColor(index) {
   return colors[index % colors.length];
 }
 
-export function BoardScheme({ board, materialLength, cutWidth }) {
+export function BoardScheme({ board, materialLength, cutWidth, lengthUnit }) {
   if (!board) {
     return null;
   }
@@ -19,7 +20,7 @@ export function BoardScheme({ board, materialLength, cutWidth }) {
       <div className="board-card__header">
         <Text weight="2">Заготовка #{board.boardNumber}</Text>
         <Caption level="1" caps={false}>
-          Использовано {formatLength(board.usedLength)} • Остаток {formatLength(board.wasteLength)}
+          Использовано {formatLength(board.usedLength, lengthUnit)} • Остаток {formatLength(board.wasteLength, lengthUnit)}
         </Caption>
       </div>
 
@@ -31,7 +32,7 @@ export function BoardScheme({ board, materialLength, cutWidth }) {
           return (
             <div className="board-track__chunk" key={`${board.boardNumber}-${index}-${piece}`}>
               <div className="board-track__piece" style={{ width: pieceWidth, background: getSegmentColor(index) }}>
-                <span>{piece}</span>
+                <span>{`${piece} ${lengthUnit}`}</span>
               </div>
               {index < board.pieces.length - 1 && cutWidth > 0 ? (
                 <div className="board-track__kerf" style={{ width: kerfWidth }} />
@@ -47,13 +48,13 @@ export function BoardScheme({ board, materialLength, cutWidth }) {
               width: `${Math.max((board.wasteLength / materialLength) * 100, 4)}%`
             }}
           >
-            <span>{board.wasteLength}</span>
+            <span>{`${board.wasteLength} ${lengthUnit}`}</span>
           </div>
         ) : null}
       </div>
 
       <Footnote>
-        Пропил: {formatLength(cutWidth)}. Серый сегмент справа показывает остаток после раскроя.
+        Пропил: {formatLength(cutWidth, lengthUnit)}. Серый сегмент справа показывает остаток после раскроя.
       </Footnote>
     </Div>
   );
