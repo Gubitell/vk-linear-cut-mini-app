@@ -14,6 +14,8 @@ body {
 
 #root {
   min-height: 100vh;
+  padding-bottom: 56px;
+  box-sizing: border-box;
 }
 
 .hero {
@@ -77,60 +79,33 @@ body {
 }
 
 .board-track {
-  display: flex;
-  align-items: stretch;
-  min-height: 68px;
+  display: block;
   width: 100%;
   overflow-x: auto;
-  padding-bottom: 4px;
+  padding-bottom: 8px;
 }
 
-.board-track__chunk {
-  display: flex;
-  align-items: center;
-  min-width: fit-content;
+.scheme-text-block {
+  display: grid;
+  gap: 6px;
+  padding: 8px 0 4px;
 }
 
-.board-track__piece,
-.board-track__waste,
-.board-track__kerf {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 68px;
+.scheme-text-line {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.board-track__piece,
-.board-track__waste {
-  min-width: 36px;
-  padding: 0 8px;
-  border-radius: 12px;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.board-track__piece span,
-.board-track__waste span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.board-track__kerf {
-  min-width: 3px;
-  background: #71757a;
-  opacity: 0.75;
-}
-
-.board-track__waste {
-  background: repeating-linear-gradient(135deg, #a0a6ad, #a0a6ad 8px, #c6cbd1 8px, #c6cbd1 16px);
+.scheme-text-spacer {
+  height: 10px;
 }
 
 .status-bar {
-  position: sticky;
+  position: fixed;
+  left: 0;
+  right: 0;
   bottom: 0;
-  z-index: 5;
+  z-index: 100;
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
   background: rgba(23, 23, 23, 0.92);
   color: #fff;

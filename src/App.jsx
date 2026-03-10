@@ -128,6 +128,37 @@ function statsRows(result, material) {
   ];
 }
 
+function getBoardSignature(board) {
+  return JSON.stringify(board.pieces);
+}
+
+function groupBoardsByScheme(boards) {
+  const groups = new Map();
+
+  for (const board of boards) {
+    const signature = getBoardSignature(board);
+
+    if (!groups.has(signature)) {
+      groups.set(signature, {
+        representativeBoard: board,
+        boardNumbers: [],
+        boardCount: 0
+      });
+    }
+
+    const currentGroup = groups.get(signature);
+    currentGroup.boardNumbers.push(board.boardNumber);
+    currentGroup.boardCount += 1;
+  }
+
+  return [...groups.values()]
+    .sort((left, right) => left.boardNumbers[0] - right.boardNumbers[0])
+    .map((group, index) => ({
+      ...group,
+      schemeNumber: index + 1
+    }));
+}
+
 export default function App() {
   const [historyStack, setHistoryStack] = useState(["home"]);
   const [userInfo, setUserInfo] = useState(null);
@@ -155,6 +186,7 @@ export default function App() {
   }, [historyStack.length]);
 
   const sortedDetails = useMemo(() => normalizeDetails(details), [details]);
+  const boardSchemes = useMemo(() => (result ? groupBoardsByScheme(result.boards) : []), [result]);
 
   function go(panel) {
     setHistoryStack((prev) => [...prev, panel]);
@@ -471,10 +503,10 @@ export default function App() {
                 </Group>
 
                 <Group header={<Header>Схема раскроя</Header>}>
-                  {result.boards.map((board) => (
+                  {boardSchemes.map((scheme) => (
                     <BoardScheme
-                      key={board.boardNumber}
-                      board={board}
+                      key={scheme.schemeNumber}
+                      scheme={scheme}
                       materialLength={result.materialLength}
                       cutWidth={Number(material.cutWidth || 0)}
                       lengthUnit={getLengthUnit(material)}
