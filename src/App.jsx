@@ -5,6 +5,7 @@ import {
   ButtonGroup,
   Card,
   CardGrid,
+  Checkbox,
   Div,
   FormItem,
   Group,
@@ -24,14 +25,14 @@ import {
 } from "@vkontakte/vkui";
 import { runTapticImpactOccurred } from "@vkontakte/vk-bridge-react";
 import { BoardScheme } from "./components/BoardScheme.jsx";
-import { MATERIAL_PRESETS } from "./data/presets.js";
 import { downloadPdfExport, downloadTxtExport } from "./lib/export.js";
-import { calculateCutting, normalizeDetails, summarizeResult } from "./lib/optimizer.js";
+import { calculateCutting, normalizeDetails } from "./lib/optimizer.js";
 import { deleteMaterialTemplate, loadHistory, loadMaterialTemplates, saveHistoryEntry, saveMaterialTemplate } from "./lib/storage.js";
-import { copyText, getUserInfoSafe, setSwipeSettings } from "./lib/vk.js";
+import { getUserInfoSafe, setSwipeSettings } from "./lib/vk.js";
 
-const EMPTY_MATERIAL = {
-  name: "Новый расчёт",
+const EMPTY_PROJECT_NAME = "Новый проект";
+const EMPTY_BLANK_FORM = {
+  name: "Новая заготовка",
   length: "6000",
   cutWidth: "3",
   cost: "450",
@@ -52,31 +53,6 @@ function generateId() {
   return `calc-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function makeHistoryEntry(material, details, result) {
-  return {
-    id: generateId(),
-    savedAt: new Date().toISOString(),
-    projectName: material.name || "Без названия",
-    material,
-    details,
-    result
-  };
-}
-
-function makeMaterialTemplate(material) {
-  const normalized = sanitizeMaterial(material);
-
-  return {
-    id: generateId(),
-    title: normalized.name || "Новая заготовка",
-    description: `${formatMeasure(normalized.length, normalized.lengthUnit)} • пропил ${formatMeasure(
-      normalized.cutWidth,
-      normalized.lengthUnit
-    )}${normalized.cost !== null ? ` • ${formatMoney(normalized.cost, normalized.currency)}` : ""}`,
-    material: normalized
-  };
-}
-
 function formatNumber(value) {
   return Number(value).toLocaleString("ru-RU");
 }
@@ -91,12 +67,12 @@ function formatDate(value) {
   });
 }
 
-function getLengthUnit(material) {
-  return material.lengthUnit?.trim() || "мм";
+function getLengthUnit(blank) {
+  return blank?.lengthUnit?.trim() || "мм";
 }
 
-function getCurrency(material) {
-  return material.currency?.trim() || "руб.";
+function getCurrency(blank) {
+  return blank?.currency?.trim() || "руб.";
 }
 
 function formatMeasure(value, unit) {
@@ -107,39 +83,79 @@ function formatMoney(value, currency) {
   return `${formatNumber(value)} ${currency}`;
 }
 
-function normalizeMaterialState(material) {
+function normalizeBlankState(blank) {
   return {
-    name: material?.name ?? "Новый расчёт",
-    length: String(material?.length ?? EMPTY_MATERIAL.length),
-    cutWidth: String(material?.cutWidth ?? EMPTY_MATERIAL.cutWidth),
-    cost: material?.cost === null || material?.cost === undefined ? "" : String(material.cost),
-    lengthUnit: getLengthUnit(material ?? EMPTY_MATERIAL),
-    currency: getCurrency(material ?? EMPTY_MATERIAL)
+    name: blank?.name ?? EMPTY_BLANK_FORM.name,
+    length: String(blank?.length ?? EMPTY_BLANK_FORM.length),
+    cutWidth: String(blank?.cutWidth ?? EMPTY_BLANK_FORM.cutWidth),
+    cost: blank?.cost === null || blank?.cost === undefined ? "" : String(blank.cost),
+    lengthUnit: getLengthUnit(blank ?? EMPTY_BLANK_FORM),
+    currency: getCurrency(blank ?? EMPTY_BLANK_FORM)
   };
 }
 
-function sanitizeMaterial(material) {
+function sanitizeBlank(blank) {
   return {
-    name: material.name.trim() || "Новый расчёт",
-    length: Number(material.length),
-    cutWidth: Number(material.cutWidth || 0),
-    cost: material.cost === "" ? null : Number(material.cost),
-    lengthUnit: getLengthUnit(material),
-    currency: getCurrency(material)
+    name: blank.name.trim() || "Новая заготовка",
+    length: Number(blank.length),
+    cutWidth: Number(blank.cutWidth || 0),
+    cost: blank.cost === "" ? null : Number(blank.cost),
+    lengthUnit: getLengthUnit(blank),
+    currency: getCurrency(blank)
   };
 }
 
-function statsRows(result, material) {
-  const lengthUnit = getLengthUnit(material);
-  const currency = getCurrency(material);
+function makeBlankTemplate(blankForm) {
+  const blank = sanitizeBlank(blankForm);
 
+  return {
+    id: generateId(),
+    title: blank.name,
+    description: `${formatMeasure(blank.length, blank.lengthUnit)} • пропил ${formatMeasure(blank.cutWidth, blank.lengthUnit)}${
+      blank.cost !== null ? ` • ${formatMoney(blank.cost, blank.currency)}` : ""
+    }`,
+    material: blank
+  };
+}
+
+function createProjectBlank(blankForm) {
+  const blank = sanitizeBlank(blankForm);
+
+  return {
+    id: generateId(),
+    ...blank,
+    details: [],
+    result: null
+  };
+}
+
+function makeHistoryEntry(projectName, blank) {
+  return {
+    id: generateId(),
+    savedAt: new Date().toISOString(),
+    projectName: projectName.trim() || EMPTY_PROJECT_NAME,
+    projectLabel: `${projectName.trim() || EMPTY_PROJECT_NAME} / ${blank.name}`,
+    material: {
+      name: blank.name,
+      length: blank.length,
+      cutWidth: blank.cutWidth,
+      cost: blank.cost,
+      lengthUnit: blank.lengthUnit,
+      currency: blank.currency
+    },
+    details: blank.details,
+    result: blank.result
+  };
+}
+
+function statsRows(result, blank) {
   return [
     ["Заготовок", `${result.boardCount} шт.`],
-    ["Материала", formatMeasure(result.totalMaterialUsed, lengthUnit)],
+    ["Материала", formatMeasure(result.totalMaterialUsed, blank.lengthUnit)],
     ["Полезный выход", `${result.benefitPercent}%`],
-    ["Отходы", `${result.wastePercent}% (${formatMeasure(result.totalWaste, lengthUnit)})`],
+    ["Отходы", `${result.wastePercent}% (${formatMeasure(result.totalWaste, blank.lengthUnit)})`],
     ["Резов", `${result.cutsCount}`],
-    ["Стоимость", result.cost === null ? "не указана" : formatMoney(result.cost, currency)]
+    ["Стоимость", result.cost === null ? "не указана" : formatMoney(result.cost, blank.currency)]
   ];
 }
 
@@ -174,13 +190,19 @@ function groupBoardsByScheme(boards) {
     }));
 }
 
+function getBlankSubtitle(blank) {
+  const price = blank.cost === null ? "без цены" : formatMoney(blank.cost, blank.currency);
+  return `${formatMeasure(blank.length, blank.lengthUnit)} • пропил ${formatMeasure(blank.cutWidth, blank.lengthUnit)} • ${price}`;
+}
+
 export default function App() {
   const [historyStack, setHistoryStack] = useState(["home"]);
   const [userInfo, setUserInfo] = useState(null);
-  const [material, setMaterial] = useState(EMPTY_MATERIAL);
+  const [projectName, setProjectName] = useState(EMPTY_PROJECT_NAME);
+  const [blankForm, setBlankForm] = useState(EMPTY_BLANK_FORM);
+  const [projectBlanks, setProjectBlanks] = useState([]);
+  const [activeBlankId, setActiveBlankId] = useState(null);
   const [detailForm, setDetailForm] = useState(EMPTY_DETAIL_FORM);
-  const [details, setDetails] = useState([]);
-  const [result, setResult] = useState(null);
   const [historyItems, setHistoryItems] = useState([]);
   const [customTemplates, setCustomTemplates] = useState([]);
   const [statusText, setStatusText] = useState("Готов к расчёту");
@@ -204,15 +226,13 @@ export default function App() {
     setSwipeSettings(historyStack.length === 1);
   }, [historyStack.length]);
 
-  const sortedDetails = useMemo(() => normalizeDetails(details), [details]);
-  const boardSchemes = useMemo(() => (result ? groupBoardsByScheme(result.boards) : []), [result]);
-  const allTemplates = useMemo(
-    () => [
-      ...MATERIAL_PRESETS.map((template) => ({ ...template, source: "builtin" })),
-      ...customTemplates.map((template) => ({ ...template, source: "custom" }))
-    ],
-    [customTemplates]
+  const activeBlank = useMemo(
+    () => projectBlanks.find((blank) => blank.id === activeBlankId) ?? null,
+    [projectBlanks, activeBlankId]
   );
+  const activeResult = activeBlank?.result ?? null;
+  const sortedDetails = useMemo(() => normalizeDetails(activeBlank?.details ?? []), [activeBlank]);
+  const boardSchemes = useMemo(() => (activeResult ? groupBoardsByScheme(activeResult.boards) : []), [activeResult]);
 
   function go(panel) {
     setHistoryStack((prev) => [...prev, panel]);
@@ -222,19 +242,102 @@ export default function App() {
     setHistoryStack((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
   }
 
-  function resetCalculation(presetMaterial = null, presetDetails = []) {
-    const nextMaterial = normalizeMaterialState(presetMaterial ?? EMPTY_MATERIAL);
-
-    setMaterial(nextMaterial);
-    setDetails(presetDetails);
+  function resetProject() {
+    setProjectName(EMPTY_PROJECT_NAME);
+    setBlankForm(EMPTY_BLANK_FORM);
+    setProjectBlanks([]);
+    setActiveBlankId(null);
     setDetailForm(EMPTY_DETAIL_FORM);
-    setResult(null);
-    setStatusText("Черновик обновлён");
-    setHistoryStack(["home", "material"]);
+    setStatusText("Новый проект");
+    setHistoryStack(["home"]);
   }
 
-  async function addMaterialTemplate() {
-    const template = makeMaterialTemplate(material);
+  function startNewBlank() {
+    setActiveBlankId(null);
+    setBlankForm({
+      ...EMPTY_BLANK_FORM,
+      name: `Заготовка ${projectBlanks.length + 1}`
+    });
+    setStatusText("Черновик новой заготовки");
+  }
+
+  function saveBlankToProject() {
+    const sanitizedBlank = sanitizeBlank(blankForm);
+
+    if (!Number.isFinite(sanitizedBlank.length) || sanitizedBlank.length <= 0) {
+      setStatusText("Длина заготовки должна быть больше 0");
+      return;
+    }
+
+    setProjectBlanks((prev) => {
+      const existing = prev.find((blank) => blank.id === activeBlankId);
+
+      if (existing) {
+        return prev.map((blank) =>
+          blank.id === activeBlankId
+            ? {
+                ...blank,
+                ...sanitizedBlank
+              }
+            : blank
+        );
+      }
+
+      const created = {
+        ...createProjectBlank(blankForm)
+      };
+
+      setActiveBlankId(created.id);
+      return [...prev, created];
+    });
+
+    setStatusText(activeBlankId ? "Заготовка обновлена" : "Заготовка добавлена в проект");
+  }
+
+  function activateBlank(blankId) {
+    const blank = projectBlanks.find((item) => item.id === blankId);
+
+    if (!blank) {
+      return;
+    }
+
+    setActiveBlankId(blank.id);
+    setBlankForm(normalizeBlankState(blank));
+    setStatusText(`Выбрана заготовка: ${blank.name}`);
+  }
+
+  function deleteProjectBlank(blankId) {
+    setProjectBlanks((prev) => {
+      const next = prev.filter((blank) => blank.id !== blankId);
+
+      if (blankId === activeBlankId) {
+        const nextActive = next[0] ?? null;
+        setActiveBlankId(nextActive?.id ?? null);
+        setBlankForm(nextActive ? normalizeBlankState(nextActive) : EMPTY_BLANK_FORM);
+      }
+
+      return next;
+    });
+
+    setStatusText("Заготовка удалена из проекта");
+  }
+
+  function addTemplateToProject(template) {
+    const created = {
+      id: generateId(),
+      ...template.material,
+      details: [],
+      result: null
+    };
+
+    setProjectBlanks((prev) => [...prev, created]);
+    setActiveBlankId(created.id);
+    setBlankForm(normalizeBlankState(created));
+    setStatusText(`Шаблон добавлен в проект: ${created.name}`);
+  }
+
+  async function saveCurrentBlankAsTemplate() {
+    const template = makeBlankTemplate(blankForm);
     const nextTemplates = await saveMaterialTemplate(template);
 
     setCustomTemplates(nextTemplates);
@@ -245,14 +348,23 @@ export default function App() {
     const nextTemplates = await deleteMaterialTemplate(templateId);
 
     setCustomTemplates(nextTemplates);
-    setStatusText("Шаблон удалён");
+    setStatusText("Шаблон заготовки удалён");
+  }
+
+  function updateActiveBlank(updater) {
+    setProjectBlanks((prev) =>
+      prev.map((blank) => (blank.id === activeBlankId ? updater(blank) : blank))
+    );
   }
 
   function appendDetail() {
+    if (!activeBlank) {
+      setStatusText("Сначала сохрани или выбери заготовку");
+      return;
+    }
+
     const length = Number(detailForm.length);
     const quantity = Number(detailForm.quantity);
-    const materialLength = Number(material.length);
-    const lengthUnit = getLengthUnit(material);
 
     if (!Number.isFinite(length) || length <= 0) {
       setStatusText("Длина детали должна быть больше 0");
@@ -264,33 +376,49 @@ export default function App() {
       return;
     }
 
-    if (Number.isFinite(materialLength) && materialLength > 0 && length > materialLength) {
-      setStatusText("Деталь длиннее исходной заготовки");
+    if (length > activeBlank.length) {
+      setStatusText("Деталь длиннее выбранной заготовки");
       return;
     }
 
-    setDetails((prev) => [...prev, { length, quantity }]);
+    updateActiveBlank((blank) => ({
+      ...blank,
+      details: [...blank.details, { length, quantity }],
+      result: null
+    }));
     setDetailForm(EMPTY_DETAIL_FORM);
-    setStatusText(`Добавлена деталь ${length} ${lengthUnit} × ${quantity}`);
+    setStatusText(`Добавлена деталь ${length} ${activeBlank.lengthUnit} × ${quantity}`);
   }
 
   function removeDetail(index) {
-    setDetails((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
+    updateActiveBlank((blank) => ({
+      ...blank,
+      details: blank.details.filter((_, currentIndex) => currentIndex !== index),
+      result: null
+    }));
   }
 
   function clearAllDetails() {
-    setDetails([]);
-    setStatusText("Список деталей очищен");
+    updateActiveBlank((blank) => ({
+      ...blank,
+      details: [],
+      result: null
+    }));
+    setStatusText("Все детали удалены");
   }
 
   function runCalculation() {
-    const nextMaterial = sanitizeMaterial(material);
+    if (!activeBlank) {
+      setStatusText("Сначала сохрани или выбери заготовку");
+      return;
+    }
+
     const calculation = calculateCutting(
-      nextMaterial.length,
-      nextMaterial.cutWidth,
-      sortedDetails,
-      nextMaterial.cost ?? 0,
-      nextMaterial.lengthUnit
+      activeBlank.length,
+      activeBlank.cutWidth,
+      activeBlank.details,
+      activeBlank.cost ?? 0,
+      activeBlank.lengthUnit
     );
 
     if (calculation.error) {
@@ -298,79 +426,71 @@ export default function App() {
       return;
     }
 
-    setMaterial({
-      name: nextMaterial.name,
-      length: String(nextMaterial.length),
-      cutWidth: String(nextMaterial.cutWidth),
-      cost: nextMaterial.cost === null ? "" : String(nextMaterial.cost),
-      lengthUnit: nextMaterial.lengthUnit,
-      currency: nextMaterial.currency
-    });
-    setResult(calculation);
+    updateActiveBlank((blank) => ({
+      ...blank,
+      result: calculation
+    }));
     setStatusText("Расчёт готов");
     runTapticImpactOccurred("light");
     go("results");
   }
 
   async function saveCurrentCalculation() {
-    if (!result) {
+    if (!activeBlank || !activeBlank.result) {
       return;
     }
 
-    const entry = makeHistoryEntry(sanitizeMaterial(material), sortedDetails, result);
+    const entry = makeHistoryEntry(projectName, activeBlank);
     const nextHistory = await saveHistoryEntry(entry);
 
     setHistoryItems(nextHistory);
-    setStatusText(`Раскрой сохранён в историю: ${entry.projectName}`);
+    setStatusText(`Раскрой сохранён в историю: ${entry.projectLabel}`);
     runTapticImpactOccurred("medium");
   }
 
-  async function copyCurrentSummary() {
-    if (!result) {
-      return;
-    }
-
-    const summary = summarizeResult(sanitizeMaterial(material), result);
-    const copied = await copyText(summary);
-
-    setStatusText(copied ? "Сводка скопирована" : "Не удалось скопировать сводку");
-  }
-
-  function openHistoryEntry(item) {
-    setMaterial(normalizeMaterialState(item.material));
-    setDetails(item.details);
-    setResult(item.result);
-    setStatusText(`Открыт расчёт: ${item.projectName}`);
-    setHistoryStack(["home", "history", "results"]);
-  }
-
   function exportTxt() {
-    if (!result) {
+    if (!activeBlank || !activeBlank.result) {
       return;
     }
 
     downloadTxtExport({
-      projectName: material.name || "Раскрой",
+      projectName,
+      blank: activeBlank,
       schemes: boardSchemes,
-      material: sanitizeMaterial(material),
       includeZeroDimensions: exportIncludeZero
     });
     setStatusText("TXT выгружен");
   }
 
   function exportPdf() {
-    if (!result) {
+    if (!activeBlank || !activeBlank.result) {
       return;
     }
 
     downloadPdfExport({
-      projectName: material.name || "Раскрой",
+      projectName,
+      blank: activeBlank,
       schemes: boardSchemes,
-      material: sanitizeMaterial(material),
       includeZeroDimensions: exportIncludeZero,
       orientation: pdfOrientation
     });
     setStatusText("PDF выгружен");
+  }
+
+  function openHistoryEntry(item) {
+    const restoredBlank = {
+      id: generateId(),
+      ...item.material,
+      details: item.details,
+      result: item.result
+    };
+
+    setProjectName(item.projectName || EMPTY_PROJECT_NAME);
+    setProjectBlanks([restoredBlank]);
+    setActiveBlankId(restoredBlank.id);
+    setBlankForm(normalizeBlankState(restoredBlank));
+    setStatusText(`Открыт раскрой: ${item.projectLabel || restoredBlank.name}`);
+    setHistoryStack(["home", "results"]);
   }
 
   return (
@@ -379,196 +499,247 @@ export default function App() {
         <View activePanel={activePanel} history={historyStack} onSwipeBack={goBack}>
           <Panel id="home">
             <PanelHeader>Оптимальный раскрой</PanelHeader>
+
             <Group>
               <Div className="hero">
                 <div className="hero__title-row">
-                  <Title level="1">VK Mini App для линейного раскроя</Title>
+                  <Title level="1">Оптимальный линейный раскрой</Title>
                   <Badge mode="prominent">FFD</Badge>
                 </div>
                 <Text className="muted-text">
-                  Расчёт заготовок, пропила, отходов и стоимости с сохранением результатов в истории.
+                  Один проект может содержать несколько разных заготовок. Шаблоны сохраняются для заготовок отдельно.
                 </Text>
-                <div className="hero__actions">
-                  <Button size="l" stretched onClick={() => resetCalculation()}>
-                    Новый расчёт
+                <div className="compact-actions">
+                  <Button size="m" onClick={resetProject}>
+                    Новый проект
                   </Button>
-                  <Button size="l" stretched mode="secondary" onClick={() => go("history")}>
-                    История
+                  <Button size="m" mode="secondary" onClick={() => go("history")}>
+                    История раскроев
                   </Button>
                 </div>
               </Div>
             </Group>
 
-            <Group header={<Header>Пользователь VK</Header>}>
-              <SimpleCell>
-                {userInfo ? `${userInfo.first_name} ${userInfo.last_name}` : "Не удалось получить профиль через Bridge"}
-              </SimpleCell>
-            </Group>
-
-            <Group header={<Header>Шаблоны заготовок</Header>}>
-              <CardGrid size="l">
-                {allTemplates.map((preset) => (
-                  <Card key={preset.id} mode="shadow" className="preset-card">
-                    <Div>
-                      <Text weight="2">{preset.title}</Text>
-                      <Text className="muted-text">{preset.description}</Text>
-                      <ButtonGroup stretched mode="horizontal" className="top-gap">
-                        <Button stretched mode="secondary" onClick={() => resetCalculation(preset.material, [])}>
-                          Использовать
-                        </Button>
-                        {preset.source === "custom" ? (
-                          <Button stretched appearance="negative" mode="tertiary" onClick={() => removeMaterialTemplate(preset.id)}>
-                            Удалить
-                          </Button>
-                        ) : null}
-                      </ButtonGroup>
-                    </Div>
-                  </Card>
-                ))}
-              </CardGrid>
-            </Group>
-          </Panel>
-
-          <Panel id="material">
-            <PanelHeader before={<PanelHeaderBack onClick={goBack} />}>Материал</PanelHeader>
-            <Group header={<Header>Параметры заготовки</Header>}>
+            <Group header={<Header>Проект</Header>}>
               <FormItem top="Название проекта">
+                <Input value={projectName} onChange={(event) => setProjectName(event.target.value)} />
+              </FormItem>
+              <SimpleCell>{userInfo ? `${userInfo.first_name} ${userInfo.last_name}` : "Профиль VK недоступен"}</SimpleCell>
+            </Group>
+
+            <Group header={<Header>Параметры заготовки</Header>}>
+              <FormItem top="Название заготовки">
                 <Input
-                  value={material.name}
-                  onChange={(event) => setMaterial((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="Например: Балкон, кухня, профиль"
+                  value={blankForm.name}
+                  onChange={(event) => setBlankForm((prev) => ({ ...prev, name: event.target.value }))}
+                  placeholder="Например: Лист 3000, Профиль 40x20"
                 />
               </FormItem>
-              <FormItem top={`Длина материала, ${getLengthUnit(material)}`}>
+              <FormItem top={`Длина заготовки, ${getLengthUnit(blankForm)}`}>
                 <Input
                   type="number"
-                  value={material.length}
-                  onChange={(event) => setMaterial((prev) => ({ ...prev, length: event.target.value }))}
+                  value={blankForm.length}
+                  onChange={(event) => setBlankForm((prev) => ({ ...prev, length: event.target.value }))}
                 />
               </FormItem>
-              <FormItem top={`Толщина реза, ${getLengthUnit(material)}`}>
+              <FormItem top={`Толщина реза, ${getLengthUnit(blankForm)}`}>
                 <Input
                   type="number"
-                  value={material.cutWidth}
-                  onChange={(event) => setMaterial((prev) => ({ ...prev, cutWidth: event.target.value }))}
+                  value={blankForm.cutWidth}
+                  onChange={(event) => setBlankForm((prev) => ({ ...prev, cutWidth: event.target.value }))}
                 />
               </FormItem>
               <FormItem top="Единица длины">
                 <Input
-                  value={material.lengthUnit}
-                  onChange={(event) => setMaterial((prev) => ({ ...prev, lengthUnit: event.target.value }))}
+                  value={blankForm.lengthUnit}
+                  onChange={(event) => setBlankForm((prev) => ({ ...prev, lengthUnit: event.target.value }))}
                   placeholder="мм, см, м, in"
                 />
               </FormItem>
-              <FormItem top={`Стоимость одной заготовки, ${getCurrency(material)}`}>
+              <FormItem top={`Стоимость одной заготовки, ${getCurrency(blankForm)}`}>
                 <Input
                   type="number"
-                  value={material.cost}
-                  onChange={(event) => setMaterial((prev) => ({ ...prev, cost: event.target.value }))}
+                  value={blankForm.cost}
+                  onChange={(event) => setBlankForm((prev) => ({ ...prev, cost: event.target.value }))}
                   placeholder="Опционально"
                 />
               </FormItem>
               <FormItem top="Обозначение валюты">
                 <Input
-                  value={material.currency}
-                  onChange={(event) => setMaterial((prev) => ({ ...prev, currency: event.target.value }))}
+                  value={blankForm.currency}
+                  onChange={(event) => setBlankForm((prev) => ({ ...prev, currency: event.target.value }))}
                   placeholder="руб., $, EUR"
                 />
               </FormItem>
               <Div>
-                <ButtonGroup stretched mode="horizontal">
-                  <Button stretched size="l" onClick={() => go("details")}>
-                    К вводу деталей
+                <div className="compact-actions">
+                  <Button size="m" onClick={saveBlankToProject}>
+                    {activeBlank ? "Обновить заготовку" : "Добавить заготовку"}
                   </Button>
-                  <Button stretched size="l" mode="secondary" onClick={addMaterialTemplate}>
-                    Сохранить как шаблон
+                  <Button size="m" mode="secondary" onClick={saveCurrentBlankAsTemplate}>
+                    Сохранить шаблон
                   </Button>
-                </ButtonGroup>
+                  <Button size="m" mode="secondary" onClick={startNewBlank}>
+                    Новая заготовка
+                  </Button>
+                  <Button size="m" mode="secondary" disabled={!activeBlank} onClick={() => go("details")}>
+                    К деталям
+                  </Button>
+                </div>
               </Div>
+            </Group>
+
+            <Group header={<Header>Заготовки проекта</Header>}>
+              {projectBlanks.length === 0 ? (
+                <Placeholder>Добавь первую заготовку в проект. После этого для каждой можно вести свой раскрой.</Placeholder>
+              ) : (
+                <CardGrid size="l">
+                  {projectBlanks.map((blank) => (
+                    <Card key={blank.id} mode="shadow" className="preset-card">
+                      <Div>
+                        <Text weight="2">{blank.name}</Text>
+                        <Text className="muted-text">{getBlankSubtitle(blank)}</Text>
+                        <Text className="muted-text">
+                          Деталей: {normalizeDetails(blank.details).length} • {blank.result ? "Есть расчёт" : "Без расчёта"}
+                        </Text>
+                        <div className="compact-actions top-gap">
+                          <Button size="s" mode={blank.id === activeBlankId ? "primary" : "secondary"} onClick={() => activateBlank(blank.id)}>
+                            Выбрать
+                          </Button>
+                          <Button size="s" mode="secondary" onClick={() => (activateBlank(blank.id), go("details"))}>
+                            Детали
+                          </Button>
+                          <Button size="s" appearance="negative" mode="tertiary" onClick={() => deleteProjectBlank(blank.id)}>
+                            Удалить
+                          </Button>
+                        </div>
+                      </Div>
+                    </Card>
+                  ))}
+                </CardGrid>
+              )}
+            </Group>
+
+            <Group header={<Header>Шаблоны заготовок</Header>}>
+              {customTemplates.length === 0 ? (
+                <Placeholder>Пока пусто. Настрой любую заготовку и нажми «Сохранить шаблон».</Placeholder>
+              ) : (
+                <CardGrid size="l">
+                  {customTemplates.map((template) => (
+                    <Card key={template.id} mode="shadow" className="preset-card">
+                      <Div>
+                        <Text weight="2">{template.title}</Text>
+                        <Text className="muted-text">{template.description}</Text>
+                        <div className="compact-actions top-gap">
+                          <Button size="s" mode="secondary" onClick={() => addTemplateToProject(template)}>
+                            Добавить в проект
+                          </Button>
+                          <Button size="s" appearance="negative" mode="tertiary" onClick={() => removeMaterialTemplate(template.id)}>
+                            Удалить
+                          </Button>
+                        </div>
+                      </Div>
+                    </Card>
+                  ))}
+                </CardGrid>
+              )}
             </Group>
           </Panel>
 
           <Panel id="details">
             <PanelHeader before={<PanelHeaderBack onClick={goBack} />}>Детали</PanelHeader>
-            <Group header={<Header>Добавить деталь</Header>}>
-              <FormItem top={`Длина детали, ${getLengthUnit(material)}`}>
-                <Input
-                  type="number"
-                  value={detailForm.length}
-                  onChange={(event) => setDetailForm((prev) => ({ ...prev, length: event.target.value }))}
-                  placeholder="Например: 1200"
-                />
-              </FormItem>
-              <FormItem top="Количество">
-                <Input
-                  type="number"
-                  value={detailForm.quantity}
-                  onChange={(event) => setDetailForm((prev) => ({ ...prev, quantity: event.target.value }))}
-                />
-              </FormItem>
-              <Div>
-                <ButtonGroup stretched mode="horizontal">
-                  <Button stretched onClick={appendDetail}>
-                    Добавить
-                  </Button>
-                  <Button stretched mode="secondary" onClick={runCalculation} disabled={sortedDetails.length === 0}>
-                    Рассчитать
-                  </Button>
-                </ButtonGroup>
-              </Div>
-            </Group>
+            {!activeBlank ? (
+              <Group>
+                <Placeholder>Сначала создай или выбери заготовку на главном экране.</Placeholder>
+              </Group>
+            ) : (
+              <>
+                <Group header={<Header>{`${projectName} • ${activeBlank.name}`}</Header>}>
+                  <SimpleCell>{getBlankSubtitle(activeBlank)}</SimpleCell>
+                </Group>
 
-            <Group
-              header={
-                <Header
-                  aside={
-                    sortedDetails.length > 0 ? (
-                      <Button size="s" mode="tertiary" appearance="negative" onClick={clearAllDetails}>
-                        Очистить всё
+                <Group header={<Header>Добавить деталь</Header>}>
+                  <FormItem top={`Длина детали, ${activeBlank.lengthUnit}`}>
+                    <Input
+                      type="number"
+                      value={detailForm.length}
+                      onChange={(event) => setDetailForm((prev) => ({ ...prev, length: event.target.value }))}
+                      placeholder="Например: 1200"
+                    />
+                  </FormItem>
+                  <FormItem top="Количество">
+                    <Input
+                      type="number"
+                      value={detailForm.quantity}
+                      onChange={(event) => setDetailForm((prev) => ({ ...prev, quantity: event.target.value }))}
+                    />
+                  </FormItem>
+                  <Div>
+                    <div className="compact-actions">
+                      <Button size="m" onClick={appendDetail}>
+                        Добавить
                       </Button>
-                    ) : null
+                      <Button size="m" mode="secondary" onClick={runCalculation} disabled={sortedDetails.length === 0}>
+                        Рассчитать
+                      </Button>
+                    </div>
+                  </Div>
+                </Group>
+
+                <Group
+                  header={
+                    <div className="section-title-row">
+                      <Header>Текущий список</Header>
+                      {sortedDetails.length > 0 ? (
+                        <Button size="s" mode="tertiary" appearance="negative" onClick={clearAllDetails}>
+                          Очистить всё
+                        </Button>
+                      ) : null}
+                    </div>
                   }
                 >
-                  Текущий список
-                </Header>
-              }
-            >
-              {sortedDetails.length === 0 ? (
-                <Placeholder>Список пуст. Добавь детали вручную.</Placeholder>
-              ) : (
-                sortedDetails.map((detail, index) => (
-                  <SimpleCell
-                    key={`${detail.length}-${detail.quantity}-${index}`}
-                    subtitle={`Суммарно ${formatMeasure(detail.length * detail.quantity, getLengthUnit(material))}`}
-                    after={
-                      <Button size="s" mode="tertiary" appearance="negative" onClick={() => removeDetail(index)}>
-                        Удалить
-                      </Button>
-                    }
-                  >
-                    {detail.length} {getLengthUnit(material)} × {detail.quantity} шт.
-                  </SimpleCell>
-                ))
-              )}
-            </Group>
+                  {sortedDetails.length === 0 ? (
+                    <Placeholder>Список пуст. Добавь детали вручную.</Placeholder>
+                  ) : (
+                    sortedDetails.map((detail, index) => (
+                      <SimpleCell
+                        key={`${detail.length}-${detail.quantity}-${index}`}
+                        subtitle={`Суммарно ${formatMeasure(detail.length * detail.quantity, activeBlank.lengthUnit)}`}
+                        after={
+                          <Button size="s" mode="tertiary" appearance="negative" onClick={() => removeDetail(index)}>
+                            Удалить
+                          </Button>
+                        }
+                      >
+                        {detail.length} {activeBlank.lengthUnit} × {detail.quantity} шт.
+                      </SimpleCell>
+                    ))
+                  )}
+                </Group>
+              </>
+            )}
           </Panel>
 
           <Panel id="results">
             <PanelHeader before={<PanelHeaderBack onClick={goBack} />}>Результат</PanelHeader>
-            {result ? (
+            {!activeBlank || !activeResult ? (
+              <Group>
+                <Placeholder>Сначала выполни расчёт для выбранной заготовки.</Placeholder>
+              </Group>
+            ) : (
               <>
                 <Group header={<Header>Сводка</Header>}>
                   <CardGrid size="l">
                     <Card mode="shadow" className="summary-card">
                       <Div>
-                        <Title level="3">{material.name || "Новый расчёт"}</Title>
+                        <Title level="3">{`${projectName} • ${activeBlank.name}`}</Title>
                         <Text className="muted-text">
-                          {formatMeasure(result.materialLength, getLengthUnit(material))} • пропил{" "}
-                          {formatMeasure(material.cutWidth || 0, getLengthUnit(material))}
+                          {formatMeasure(activeBlank.length, activeBlank.lengthUnit)} • пропил{" "}
+                          {formatMeasure(activeBlank.cutWidth, activeBlank.lengthUnit)}
                         </Text>
                         <Separator className="top-gap" />
                         <div className="stats-grid">
-                          {statsRows(result, material).map(([label, value]) => (
+                          {statsRows(activeResult, activeBlank).map(([label, value]) => (
                             <div className="stats-grid__row" key={label}>
                               <span>{label}</span>
                               <strong>{value}</strong>
@@ -579,54 +750,46 @@ export default function App() {
                     </Card>
                   </CardGrid>
                   <Div>
-                    <ButtonGroup stretched mode="horizontal">
-                      <Button stretched onClick={saveCurrentCalculation}>
+                    <div className="compact-actions">
+                      <Button size="m" onClick={saveCurrentCalculation}>
                         Сохранить в историю
                       </Button>
-                      <Button stretched mode="secondary" onClick={copyCurrentSummary}>
-                        Копировать
-                      </Button>
-                    </ButtonGroup>
+                    </div>
                   </Div>
                 </Group>
 
                 <Group header={<Header>Экспорт</Header>}>
-                  <FormItem top="TXT и PDF">
-                    <ButtonGroup stretched mode="horizontal">
-                      <Button stretched mode={exportIncludeZero ? "primary" : "secondary"} onClick={() => setExportIncludeZero(true)}>
-                        С размерами от нуля
-                      </Button>
-                      <Button stretched mode={!exportIncludeZero ? "primary" : "secondary"} onClick={() => setExportIncludeZero(false)}>
-                        Без размеров от нуля
-                      </Button>
-                    </ButtonGroup>
+                  <FormItem>
+                    <Checkbox checked={exportIncludeZero} onChange={(event) => setExportIncludeZero(event.target.checked)}>
+                      Включать размеры от нуля
+                    </Checkbox>
                   </FormItem>
                   <FormItem top="Ориентация PDF">
-                    <ButtonGroup stretched mode="horizontal">
-                      <Button stretched mode={pdfOrientation === "portrait" ? "primary" : "secondary"} onClick={() => setPdfOrientation("portrait")}>
+                    <div className="compact-actions">
+                      <Button size="s" mode={pdfOrientation === "portrait" ? "primary" : "secondary"} onClick={() => setPdfOrientation("portrait")}>
                         Вертикально
                       </Button>
-                      <Button stretched mode={pdfOrientation === "landscape" ? "primary" : "secondary"} onClick={() => setPdfOrientation("landscape")}>
+                      <Button size="s" mode={pdfOrientation === "landscape" ? "primary" : "secondary"} onClick={() => setPdfOrientation("landscape")}>
                         Горизонтально
                       </Button>
-                    </ButtonGroup>
+                    </div>
                   </FormItem>
-                  <Div>
-                    <ButtonGroup stretched mode="horizontal">
-                      <Button stretched onClick={exportTxt}>
+                  <FormItem top="Файлы">
+                    <div className="compact-actions">
+                      <Button size="m" onClick={exportTxt}>
                         Скачать TXT
                       </Button>
-                      <Button stretched mode="secondary" onClick={exportPdf}>
+                      <Button size="m" mode="secondary" onClick={exportPdf}>
                         Скачать PDF
                       </Button>
-                    </ButtonGroup>
-                  </Div>
+                    </div>
+                  </FormItem>
                 </Group>
 
                 <Group header={<Header>Детали</Header>}>
-                  {result.details.map((detail) => (
+                  {activeResult.details.map((detail) => (
                     <SimpleCell key={`${detail.length}-${detail.quantity}`}>
-                      {detail.length} {getLengthUnit(material)} × {detail.quantity} шт.
+                      {detail.length} {activeBlank.lengthUnit} × {detail.quantity} шт.
                     </SimpleCell>
                   ))}
                 </Group>
@@ -636,17 +799,13 @@ export default function App() {
                     <BoardScheme
                       key={scheme.schemeNumber}
                       scheme={scheme}
-                      materialLength={result.materialLength}
-                      cutWidth={Number(material.cutWidth || 0)}
-                      lengthUnit={getLengthUnit(material)}
+                      materialLength={activeResult.materialLength}
+                      cutWidth={activeBlank.cutWidth}
+                      lengthUnit={activeBlank.lengthUnit}
                     />
                   ))}
                 </Group>
               </>
-            ) : (
-              <Group>
-                <Placeholder>Сначала выполни расчёт.</Placeholder>
-              </Group>
             )}
           </Panel>
 
@@ -654,19 +813,19 @@ export default function App() {
             <PanelHeader before={<PanelHeaderBack onClick={goBack} />}>История раскроев</PanelHeader>
             <Group header={<Header>Сохранённые раскрои</Header>}>
               {historyItems.length === 0 ? (
-                <Placeholder>История пока пустая. Сохрани любой расчёт, и он попадёт сюда через VK Bridge Storage.</Placeholder>
+                <Placeholder>История пока пустая. Сохрани любой расчёт, и он появится здесь.</Placeholder>
               ) : (
                 historyItems.map((item) => (
                   <SimpleCell
                     key={item.id}
-                    subtitle={`${formatDate(item.savedAt)} • ${item.result.boardCount} заготовок • ${item.result.wastePercent}% отходов • ${getLengthUnit(item.material)}`}
+                    subtitle={`${formatDate(item.savedAt)} • ${item.result.boardCount} заготовок • ${item.result.wastePercent}% отходов`}
                     after={
                       <Button size="s" mode="secondary" onClick={() => openHistoryEntry(item)}>
                         Открыть
                       </Button>
                     }
                   >
-                    {item.projectName}
+                    {item.projectLabel || item.projectName}
                   </SimpleCell>
                 ))
               )}

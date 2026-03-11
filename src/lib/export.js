@@ -1,4 +1,14 @@
-import { jsPDF } from "jspdf";
+import pdfMake from "pdfmake/build/pdfmake";
+import pdfFonts from "pdfmake/build/vfs_fonts";
+
+function ensurePdfFonts() {
+  if (typeof pdfMake.addVirtualFileSystem === "function") {
+    pdfMake.addVirtualFileSystem(pdfFonts);
+    return;
+  }
+
+  pdfMake.vfs = pdfFonts?.vfs ?? pdfFonts?.pdfMake?.vfs;
+}
 
 function formatNumber(value) {
   return Number(value).toLocaleString("ru-RU");
@@ -75,36 +85,24 @@ function getSchemeTitle(scheme) {
   return `Схема #${scheme.schemeNumber} • ${label} ${formatRanges(scheme.boardNumbers)}`;
 }
 
-function getTextSchemeLine(scheme, material) {
-  const { groups } = groupConsecutivePieces(scheme.representativeBoard.pieces, Number(material.cutWidth || 0));
-  const chunks = groups.map((group) => {
+function getSchemeTextLine(scheme, blank) {
+  const { groups } = groupConsecutivePieces(scheme.representativeBoard.pieces, Number(blank.cutWidth || 0));
+  const parts = groups.map((group) => {
     const pieceLabel =
       group.startPieceNumber === group.endPieceNumber ? `№${group.startPieceNumber}` : `№${group.startPieceNumber}-${group.endPieceNumber}`;
 
-    return `[ ${pieceLabel} ${formatLength(group.length, material.lengthUnit)}${group.count > 1 ? ` (x${group.count})` : ""} ]`;
+    return `[ ${pieceLabel} ${formatLength(group.length, blank.lengthUnit)}${group.count > 1 ? ` (x${group.count})` : ""} ]`;
   });
 
-  return `${scheme.boardCount}x ${chunks.join(" ")} = ${formatLength(scheme.representativeBoard.usedLength, material.lengthUnit)}`;
+  return `${scheme.boardCount}x ${parts.join(" ")} = ${formatLength(scheme.representativeBoard.usedLength, blank.lengthUnit)}`;
 }
 
-function getZeroDimensionsLine(scheme, material) {
-  const { cutPositions } = groupConsecutivePieces(scheme.representativeBoard.pieces, Number(material.cutWidth || 0));
+function getZeroDimensionsLine(scheme, blank) {
+  const { cutPositions } = groupConsecutivePieces(scheme.representativeBoard.pieces, Number(blank.cutWidth || 0));
   const values = [0, ...cutPositions];
-  const formatted = values.map((value) => (value === 0 ? "0" : formatLength(value, material.lengthUnit)));
+  const formatted = values.map((value) => (value === 0 ? "0" : formatLength(value, blank.lengthUnit)));
 
   return `${scheme.boardCount}x ( ${formatted.join(" | ")} )`;
-}
-
-function getSchemeTextBlock(scheme, material, includeZeroDimensions) {
-  const lines = [getTextSchemeLine(scheme, material)];
-
-  if (includeZeroDimensions) {
-    lines.push("");
-    lines.push("Размеры от нуля:");
-    lines.push(getZeroDimensionsLine(scheme, material));
-  }
-
-  return lines;
 }
 
 function saveBlob(filename, type, content) {
@@ -117,17 +115,63 @@ function saveBlob(filename, type, content) {
   URL.revokeObjectURL(url);
 }
 
-export function downloadTxtExport({ projectName, schemes, material, includeZeroDimensions }) {
+function makeSafeFilename(value) {
+  return (value || "raskroy").replace(/[^\wа-яА-Я.-]+/g, "_");
+}
+
+function buildGraphicTable(scheme, blank) {
+  const { groups } = groupConsecutivePieces(scheme.representativeBoard.pieces, Number(blank.cutWidth || 0));
+  const colors = ["#2688eb", "#4bb34b", "#ff9f1a", "#8f3ffd", "#e64646", "#33b5e5"];
+  const widths = groups.map((group) => Math.max(group.length * group.count + blank.cutWidth * Math.max(group.count - 1, 0), 60));
+  const body = [
+    groups.map((group, index) => {
+      const pieceLabel =
+        group.startPieceNumber === group.endPieceNumber ? `№${group.startPieceNumber}` : `№${group.startPieceNumber}-${group.endPieceNumber}`;
+      const lengthLabel =
+        group.count > 1 ? `${formatNumber(group.length)} ${blank.lengthUnit} (x${group.count})` : `${formatNumber(group.length)} ${blank.lengthUnit}`;
+
+      return {
+        text: `${pieceLabel}\n${lengthLabel}`,
+        alignment: "center",
+        fillColor: colors[index % colors.length],
+        color: "#111111",
+        margin: [4, 8, 4, 8]
+      };
+    })
+  ];
+
+  return {
+    table: {
+      widths,
+      body
+    },
+    layout: {
+      hLineWidth: () => 1,
+      vLineWidth: () => 1,
+      hLineColor: () => "#64686c",
+      vLineColor: () => "#64686c"
+    }
+  };
+}
+
+export function downloadTxtExport({ projectName, blank, schemes, includeZeroDimensions }) {
   const lines = [
     projectName || "Раскрой",
-    `Заготовка: ${formatLength(material.length, material.lengthUnit)}`,
-    `Пропил: ${formatLength(material.cutWidth, material.lengthUnit)}`,
+    `Заготовка: ${blank.name}`,
+    `Длина: ${formatLength(blank.length, blank.lengthUnit)}`,
+    `Пропил: ${formatLength(blank.cutWidth, blank.lengthUnit)}`,
     ""
   ];
 
   schemes.forEach((scheme, index) => {
     lines.push(getSchemeTitle(scheme));
-    lines.push(...getSchemeTextBlock(scheme, material, includeZeroDimensions));
+    lines.push(getSchemeTextLine(scheme, blank));
+
+    if (includeZeroDimensions) {
+      lines.push("");
+      lines.push("Размеры от нуля:");
+      lines.push(getZeroDimensionsLine(scheme, blank));
+    }
 
     if (index < schemes.length - 1) {
       lines.push("");
@@ -135,132 +179,71 @@ export function downloadTxtExport({ projectName, schemes, material, includeZeroD
     }
   });
 
-  const safeName = (projectName || "raskroy").replace(/[^\wа-яА-Я.-]+/g, "_");
-  saveBlob(`${safeName}.txt`, "text/plain;charset=utf-8", lines.join("\n"));
+  saveBlob(`${makeSafeFilename(`${projectName}_${blank.name}`)}.txt`, "text/plain;charset=utf-8", lines.join("\n"));
 }
 
-function drawWrappedText(doc, lines, x, y, maxWidth, lineHeight = 5) {
-  let currentY = y;
+export function downloadPdfExport({ projectName, blank, schemes, includeZeroDimensions, orientation }) {
+  ensurePdfFonts();
 
-  for (const line of lines) {
-    const split = doc.splitTextToSize(line, maxWidth);
-
-    if (split.length === 0) {
-      currentY += lineHeight;
-      continue;
+  const content = [
+    { text: projectName || "Раскрой", style: "title" },
+    { text: `Заготовка: ${blank.name}`, style: "subtitle" },
+    {
+      text: `Длина ${formatLength(blank.length, blank.lengthUnit)} • Пропил ${formatLength(blank.cutWidth, blank.lengthUnit)}${
+        blank.cost !== null ? ` • Цена ${formatNumber(blank.cost)} ${blank.currency}` : ""
+      }`,
+      margin: [0, 0, 0, 12]
     }
-
-    doc.text(split, x, currentY);
-    currentY += split.length * lineHeight;
-  }
-
-  return currentY;
-}
-
-function drawSchemeGraphic(doc, scheme, material, x, y, width) {
-  const board = scheme.representativeBoard;
-  const cutWidth = Number(material.cutWidth || 0);
-  const materialLength = Number(material.length || 0);
-  const { groups } = groupConsecutivePieces(board.pieces, cutWidth);
-  const colors = [
-    [38, 136, 235],
-    [75, 179, 75],
-    [255, 159, 26],
-    [143, 63, 253],
-    [230, 70, 70],
-    [51, 181, 229]
   ];
-  const height = 16;
-  const boardScale = width / materialLength;
-  let currentX = x;
-
-  doc.setDrawColor(100, 104, 108);
-  doc.setFillColor(236, 234, 217);
-  doc.rect(x, y, width, height, "FD");
-
-  groups.forEach((group, index) => {
-    const groupLength = group.length * group.count + cutWidth * Math.max(group.count - 1, 0);
-    const groupWidth = Math.max(groupLength * boardScale, 18);
-    const [r, g, b] = colors[index % colors.length];
-    const pieceLabel =
-      group.startPieceNumber === group.endPieceNumber ? `№${group.startPieceNumber}` : `№${group.startPieceNumber}-${group.endPieceNumber}`;
-    const line2 =
-      group.count > 1 ? `${formatNumber(group.length)} ${material.lengthUnit} (x${group.count})` : `${formatNumber(group.length)} ${material.lengthUnit}`;
-
-    doc.setFillColor(r, g, b);
-    doc.rect(currentX, y, groupWidth, height, "F");
-    doc.setTextColor(20, 20, 20);
-    doc.setFontSize(8);
-    doc.text(pieceLabel, currentX + groupWidth / 2, y + 6, { align: "center" });
-    doc.text(line2, currentX + groupWidth / 2, y + 12, { align: "center" });
-
-    currentX += groupWidth;
-  });
-
-  const wasteLength = Math.max(materialLength - board.usedLength, 0);
-  if (wasteLength > 0) {
-    const wasteWidth = wasteLength * boardScale;
-    doc.setFillColor(215, 217, 220);
-    doc.rect(x + width - wasteWidth, y, wasteWidth, height, "F");
-  }
-
-  doc.setTextColor(80, 80, 80);
-  doc.setFontSize(9);
-  doc.text(`${scheme.boardCount}x`, x - 6, y + 10, { align: "right" });
-}
-
-export function downloadPdfExport({ projectName, schemes, material, includeZeroDimensions, orientation }) {
-  const doc = new jsPDF({
-    orientation,
-    unit: "mm",
-    format: "a4"
-  });
-
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 14;
-  const usableWidth = pageWidth - margin * 2;
 
   schemes.forEach((scheme, index) => {
-    if (index > 0) {
-      doc.addPage();
+    content.push({ text: getSchemeTitle(scheme), style: "section" });
+    content.push({
+      text: `Использовано ${formatLength(scheme.representativeBoard.usedLength, blank.lengthUnit)} • Остаток ${formatLength(
+        Math.max(blank.length - scheme.representativeBoard.usedLength, 0),
+        blank.lengthUnit
+      )}`,
+      margin: [0, 0, 0, 8]
+    });
+    content.push(buildGraphicTable(scheme, blank));
+    content.push({ text: getSchemeTextLine(scheme, blank), margin: [0, 8, 0, 0] });
+
+    if (includeZeroDimensions) {
+      content.push({ text: "Размеры от нуля:", margin: [0, 8, 0, 0] });
+      content.push({ text: getZeroDimensionsLine(scheme, blank) });
     }
 
-    let cursorY = margin;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text(projectName || "Раскрой", margin, cursorY);
-    cursorY += 8;
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
-    doc.text(getSchemeTitle(scheme), margin, cursorY);
-    cursorY += 6;
-    doc.text(
-      `Использовано ${formatLength(scheme.representativeBoard.usedLength, material.lengthUnit)} • Остаток ${formatLength(
-        Math.max(Number(material.length) - scheme.representativeBoard.usedLength, 0),
-        material.lengthUnit
-      )}`,
-      margin,
-      cursorY
-    );
-    cursorY += 8;
-
-    drawSchemeGraphic(doc, scheme, material, margin + 8, cursorY, usableWidth - 8);
-    cursorY += 24;
-
-    doc.setFontSize(10);
-    const textLines = getSchemeTextBlock(scheme, material, includeZeroDimensions);
-    cursorY = drawWrappedText(doc, textLines, margin, cursorY, usableWidth, 5);
-    cursorY += 8;
-
-    doc.setFontSize(9);
-    const footerText = `Пропил: ${formatLength(material.cutWidth, material.lengthUnit)} • Формат: ${
-      includeZeroDimensions ? "с размерами от нуля" : "без размеров от нуля"
-    }`;
-    drawWrappedText(doc, [footerText], margin, Math.min(cursorY, pageHeight - 12), usableWidth, 4.5);
+    if (index < schemes.length - 1) {
+      content.push({ text: "", pageBreak: "after" });
+    }
   });
 
-  const safeName = (projectName || "raskroy").replace(/[^\wа-яА-Я.-]+/g, "_");
-  doc.save(`${safeName}.pdf`);
+  pdfMake
+    .createPdf({
+      pageOrientation: orientation,
+      pageSize: "A4",
+      pageMargins: [24, 24, 24, 24],
+      defaultStyle: {
+        font: "Roboto",
+        fontSize: 10
+      },
+      styles: {
+        title: {
+          fontSize: 18,
+          bold: true
+        },
+        subtitle: {
+          fontSize: 12,
+          bold: true,
+          margin: [0, 4, 0, 6]
+        },
+        section: {
+          fontSize: 12,
+          bold: true,
+          margin: [0, 12, 0, 6]
+        }
+      },
+      content
+    })
+    .download(`${makeSafeFilename(`${projectName}_${blank.name}`)}.pdf`);
 }
