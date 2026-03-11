@@ -13,6 +13,7 @@
     "@vkontakte/vk-bridge": "latest",
     "@vkontakte/vk-bridge-react": "latest",
     "@vkontakte/vkui": "latest",
+    "jspdf": "latest",
     "react": "latest",
     "react-dom": "latest"
   },

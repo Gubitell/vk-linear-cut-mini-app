@@ -25,8 +25,9 @@ import {
 import { runTapticImpactOccurred } from "@vkontakte/vk-bridge-react";
 import { BoardScheme } from "./components/BoardScheme.jsx";
 import { MATERIAL_PRESETS } from "./data/presets.js";
+import { downloadPdfExport, downloadTxtExport } from "./lib/export.js";
 import { calculateCutting, normalizeDetails, summarizeResult } from "./lib/optimizer.js";
-import { loadHistory, saveHistoryEntry } from "./lib/storage.js";
+import { deleteMaterialTemplate, loadHistory, loadMaterialTemplates, saveHistoryEntry, saveMaterialTemplate } from "./lib/storage.js";
 import { copyText, getUserInfoSafe, setSwipeSettings } from "./lib/vk.js";
 
 const EMPTY_MATERIAL = {
@@ -59,6 +60,20 @@ function makeHistoryEntry(material, details, result) {
     material,
     details,
     result
+  };
+}
+
+function makeMaterialTemplate(material) {
+  const normalized = sanitizeMaterial(material);
+
+  return {
+    id: generateId(),
+    title: normalized.name || "Новая заготовка",
+    description: `${formatMeasure(normalized.length, normalized.lengthUnit)} • пропил ${formatMeasure(
+      normalized.cutWidth,
+      normalized.lengthUnit
+    )}${normalized.cost !== null ? ` • ${formatMoney(normalized.cost, normalized.currency)}` : ""}`,
+    material: normalized
   };
 }
 
@@ -167,7 +182,10 @@ export default function App() {
   const [details, setDetails] = useState([]);
   const [result, setResult] = useState(null);
   const [historyItems, setHistoryItems] = useState([]);
+  const [customTemplates, setCustomTemplates] = useState([]);
   const [statusText, setStatusText] = useState("Готов к расчёту");
+  const [exportIncludeZero, setExportIncludeZero] = useState(true);
+  const [pdfOrientation, setPdfOrientation] = useState("landscape");
 
   const activePanel = historyStack[historyStack.length - 1];
 
@@ -179,6 +197,7 @@ export default function App() {
     });
 
     loadHistory().then(setHistoryItems);
+    loadMaterialTemplates().then(setCustomTemplates);
   }, []);
 
   useEffect(() => {
@@ -187,6 +206,13 @@ export default function App() {
 
   const sortedDetails = useMemo(() => normalizeDetails(details), [details]);
   const boardSchemes = useMemo(() => (result ? groupBoardsByScheme(result.boards) : []), [result]);
+  const allTemplates = useMemo(
+    () => [
+      ...MATERIAL_PRESETS.map((template) => ({ ...template, source: "builtin" })),
+      ...customTemplates.map((template) => ({ ...template, source: "custom" }))
+    ],
+    [customTemplates]
+  );
 
   function go(panel) {
     setHistoryStack((prev) => [...prev, panel]);
@@ -205,6 +231,21 @@ export default function App() {
     setResult(null);
     setStatusText("Черновик обновлён");
     setHistoryStack(["home", "material"]);
+  }
+
+  async function addMaterialTemplate() {
+    const template = makeMaterialTemplate(material);
+    const nextTemplates = await saveMaterialTemplate(template);
+
+    setCustomTemplates(nextTemplates);
+    setStatusText(`Шаблон сохранён: ${template.title}`);
+  }
+
+  async function removeMaterialTemplate(templateId) {
+    const nextTemplates = await deleteMaterialTemplate(templateId);
+
+    setCustomTemplates(nextTemplates);
+    setStatusText("Шаблон удалён");
   }
 
   function appendDetail() {
@@ -235,6 +276,11 @@ export default function App() {
 
   function removeDetail(index) {
     setDetails((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
+  }
+
+  function clearAllDetails() {
+    setDetails([]);
+    setStatusText("Список деталей очищен");
   }
 
   function runCalculation() {
@@ -275,7 +321,7 @@ export default function App() {
     const nextHistory = await saveHistoryEntry(entry);
 
     setHistoryItems(nextHistory);
-    setStatusText(`Сохранено: ${entry.projectName}`);
+    setStatusText(`Раскрой сохранён в историю: ${entry.projectName}`);
     runTapticImpactOccurred("medium");
   }
 
@@ -296,6 +342,35 @@ export default function App() {
     setResult(item.result);
     setStatusText(`Открыт расчёт: ${item.projectName}`);
     setHistoryStack(["home", "history", "results"]);
+  }
+
+  function exportTxt() {
+    if (!result) {
+      return;
+    }
+
+    downloadTxtExport({
+      projectName: material.name || "Раскрой",
+      schemes: boardSchemes,
+      material: sanitizeMaterial(material),
+      includeZeroDimensions: exportIncludeZero
+    });
+    setStatusText("TXT выгружен");
+  }
+
+  function exportPdf() {
+    if (!result) {
+      return;
+    }
+
+    downloadPdfExport({
+      projectName: material.name || "Раскрой",
+      schemes: boardSchemes,
+      material: sanitizeMaterial(material),
+      includeZeroDimensions: exportIncludeZero,
+      orientation: pdfOrientation
+    });
+    setStatusText("PDF выгружен");
   }
 
   return (
@@ -330,21 +405,23 @@ export default function App() {
               </SimpleCell>
             </Group>
 
-            <Group header={<Header>Шаблоны материала</Header>}>
+            <Group header={<Header>Шаблоны заготовок</Header>}>
               <CardGrid size="l">
-                {MATERIAL_PRESETS.map((preset) => (
+                {allTemplates.map((preset) => (
                   <Card key={preset.id} mode="shadow" className="preset-card">
                     <Div>
                       <Text weight="2">{preset.title}</Text>
                       <Text className="muted-text">{preset.description}</Text>
-                      <Button
-                        stretched
-                        mode="secondary"
-                        className="top-gap"
-                        onClick={() => resetCalculation(preset.material, [])}
-                      >
-                        Использовать
-                      </Button>
+                      <ButtonGroup stretched mode="horizontal" className="top-gap">
+                        <Button stretched mode="secondary" onClick={() => resetCalculation(preset.material, [])}>
+                          Использовать
+                        </Button>
+                        {preset.source === "custom" ? (
+                          <Button stretched appearance="negative" mode="tertiary" onClick={() => removeMaterialTemplate(preset.id)}>
+                            Удалить
+                          </Button>
+                        ) : null}
+                      </ButtonGroup>
                     </Div>
                   </Card>
                 ))}
@@ -399,9 +476,14 @@ export default function App() {
                 />
               </FormItem>
               <Div>
-                <Button stretched size="l" onClick={() => go("details")}>
-                  К вводу деталей
-                </Button>
+                <ButtonGroup stretched mode="horizontal">
+                  <Button stretched size="l" onClick={() => go("details")}>
+                    К вводу деталей
+                  </Button>
+                  <Button stretched size="l" mode="secondary" onClick={addMaterialTemplate}>
+                    Сохранить как шаблон
+                  </Button>
+                </ButtonGroup>
               </Div>
             </Group>
           </Panel>
@@ -436,7 +518,21 @@ export default function App() {
               </Div>
             </Group>
 
-            <Group header={<Header>Текущий список</Header>}>
+            <Group
+              header={
+                <Header
+                  aside={
+                    sortedDetails.length > 0 ? (
+                      <Button size="s" mode="tertiary" appearance="negative" onClick={clearAllDetails}>
+                        Очистить всё
+                      </Button>
+                    ) : null
+                  }
+                >
+                  Текущий список
+                </Header>
+              }
+            >
               {sortedDetails.length === 0 ? (
                 <Placeholder>Список пуст. Добавь детали вручную.</Placeholder>
               ) : (
@@ -485,10 +581,43 @@ export default function App() {
                   <Div>
                     <ButtonGroup stretched mode="horizontal">
                       <Button stretched onClick={saveCurrentCalculation}>
-                        Сохранить
+                        Сохранить в историю
                       </Button>
                       <Button stretched mode="secondary" onClick={copyCurrentSummary}>
                         Копировать
+                      </Button>
+                    </ButtonGroup>
+                  </Div>
+                </Group>
+
+                <Group header={<Header>Экспорт</Header>}>
+                  <FormItem top="TXT и PDF">
+                    <ButtonGroup stretched mode="horizontal">
+                      <Button stretched mode={exportIncludeZero ? "primary" : "secondary"} onClick={() => setExportIncludeZero(true)}>
+                        С размерами от нуля
+                      </Button>
+                      <Button stretched mode={!exportIncludeZero ? "primary" : "secondary"} onClick={() => setExportIncludeZero(false)}>
+                        Без размеров от нуля
+                      </Button>
+                    </ButtonGroup>
+                  </FormItem>
+                  <FormItem top="Ориентация PDF">
+                    <ButtonGroup stretched mode="horizontal">
+                      <Button stretched mode={pdfOrientation === "portrait" ? "primary" : "secondary"} onClick={() => setPdfOrientation("portrait")}>
+                        Вертикально
+                      </Button>
+                      <Button stretched mode={pdfOrientation === "landscape" ? "primary" : "secondary"} onClick={() => setPdfOrientation("landscape")}>
+                        Горизонтально
+                      </Button>
+                    </ButtonGroup>
+                  </FormItem>
+                  <Div>
+                    <ButtonGroup stretched mode="horizontal">
+                      <Button stretched onClick={exportTxt}>
+                        Скачать TXT
+                      </Button>
+                      <Button stretched mode="secondary" onClick={exportPdf}>
+                        Скачать PDF
                       </Button>
                     </ButtonGroup>
                   </Div>
@@ -522,8 +651,8 @@ export default function App() {
           </Panel>
 
           <Panel id="history">
-            <PanelHeader before={<PanelHeaderBack onClick={goBack} />}>История</PanelHeader>
-            <Group header={<Header>Сохранённые расчёты</Header>}>
+            <PanelHeader before={<PanelHeaderBack onClick={goBack} />}>История раскроев</PanelHeader>
+            <Group header={<Header>Сохранённые раскрои</Header>}>
               {historyItems.length === 0 ? (
                 <Placeholder>История пока пустая. Сохрани любой расчёт, и он попадёт сюда через VK Bridge Storage.</Placeholder>
               ) : (

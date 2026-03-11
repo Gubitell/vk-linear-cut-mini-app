@@ -1,6 +1,7 @@
 import { bridgeStorageGet, bridgeStorageSet } from "./vk.js";
 
 const HISTORY_KEY = "linear_cut_history_v1";
+const TEMPLATES_KEY = "material_templates_v1";
 const HISTORY_LIMIT = 20;
 
 function parseHistory(rawValue) {
@@ -54,4 +55,53 @@ export async function saveHistoryEntry(entry) {
   await bridgeStorageSet(HISTORY_KEY, JSON.stringify(nextHistory));
 
   return nextHistory;
+}
+
+function getLocalTemplates() {
+  try {
+    return parseHistory(window.localStorage.getItem(TEMPLATES_KEY));
+  } catch {
+    return [];
+  }
+}
+
+function setLocalTemplates(templates) {
+  try {
+    window.localStorage.setItem(TEMPLATES_KEY, JSON.stringify(templates));
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+export async function loadMaterialTemplates() {
+  const fromBridge = parseHistory(await bridgeStorageGet(TEMPLATES_KEY));
+
+  if (fromBridge.length > 0) {
+    setLocalTemplates(fromBridge);
+    return fromBridge;
+  }
+
+  return getLocalTemplates();
+}
+
+export async function saveMaterialTemplate(template) {
+  const nextTemplates = [template, ...getLocalTemplates().filter((item) => item.id !== template.id)].sort((left, right) =>
+    left.title.localeCompare(right.title, "ru-RU")
+  );
+
+  setLocalTemplates(nextTemplates);
+  await bridgeStorageSet(TEMPLATES_KEY, JSON.stringify(nextTemplates));
+
+  return nextTemplates;
+}
+
+export async function deleteMaterialTemplate(templateId) {
+  const nextTemplates = getLocalTemplates().filter((item) => item.id !== templateId);
+
+  setLocalTemplates(nextTemplates);
+  await bridgeStorageSet(TEMPLATES_KEY, JSON.stringify(nextTemplates));
+
+  return nextTemplates;
 }
