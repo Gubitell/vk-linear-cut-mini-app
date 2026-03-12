@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "verify:optimizer": "node ./scripts/verify-optimizer.mjs"
+    "verify:optimizer": "node ./scripts/verify-optimizer.mjs",
+    "deploy": "vk-miniapps-deploy"
   },
   "dependencies": {
     "@vkontakte/vk-bridge": "latest",
@@ -18,6 +19,7 @@
     "react-dom": "latest"
   },
   "devDependencies": {
+    "@vkontakte/vk-miniapps-deploy": "latest",
     "vite": "latest"
   }
 }
