@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Caption, Div, Footnote, Text } from "@vkontakte/vkui";
 
 const MIN_SEGMENT_WIDTH = 56;
@@ -198,7 +198,52 @@ function buildRulerSegments(startX, endX, markerPositions) {
   return segments;
 }
 
+function clampTransform(scale, x, y, viewportWidth, viewportHeight, contentWidth, contentHeight) {
+  const scaledWidth = contentWidth * scale;
+  const scaledHeight = contentHeight * scale;
+
+  let nextX = x;
+  let nextY = y;
+
+  if (scaledWidth <= viewportWidth) {
+    nextX = (viewportWidth - scaledWidth) / 2;
+  } else {
+    const minX = viewportWidth - scaledWidth;
+    nextX = Math.min(0, Math.max(minX, x));
+  }
+
+  if (scaledHeight <= viewportHeight) {
+    nextY = (viewportHeight - scaledHeight) / 2;
+  } else {
+    const minY = viewportHeight - scaledHeight;
+    nextY = Math.min(0, Math.max(minY, y));
+  }
+
+  return { scale, x: nextX, y: nextY };
+}
+
 export function BoardScheme({ scheme, materialLength, cutWidth, lengthUnit }) {
+  const viewportRef = useRef(null);
+  const viewRef = useRef({ scale: 1, x: 0, y: 0 });
+  const pointerStateRef = useRef({
+    activePointerId: null,
+    dragStartX: 0,
+    dragStartY: 0,
+    originX: 0,
+    originY: 0
+  });
+  const pinchStateRef = useRef({
+    pointers: new Map(),
+    startDistance: 0,
+    startScale: 1,
+    startX: 0,
+    startY: 0,
+    centerX: 0,
+    centerY: 0
+  });
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 280 });
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+
   if (!scheme) {
     return null;
   }
@@ -222,6 +267,206 @@ export function BoardScheme({ scheme, materialLength, cutWidth, lengthUnit }) {
   const barEndX = barX + totalWidth;
   const markerXs = cutPositions.map((position) => barX + position);
   const rulerSegments = buildRulerSegments(barX, barEndX, markerXs);
+  const minScale = useMemo(() => {
+    if (!viewportSize.width) {
+      return 1;
+    }
+
+    return Math.min(1, viewportSize.width / svgWidth);
+  }, [viewportSize.width, svgWidth]);
+  const maxScale = Math.max(minScale * 4, 4);
+
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+
+  useEffect(() => {
+    const node = viewportRef.current;
+
+    if (!node) {
+      return undefined;
+    }
+
+    const updateSize = () => {
+      setViewportSize({
+        width: node.clientWidth,
+        height: node.clientHeight
+      });
+    };
+
+    updateSize();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(node);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", updateSize);
+    return () => window.removeEventListener("resize", updateSize);
+  }, []);
+
+  useEffect(() => {
+    if (!viewportSize.width) {
+      return;
+    }
+
+    const nextScale = minScale;
+    const centered = clampTransform(nextScale, 0, 0, viewportSize.width, viewportSize.height, svgWidth, svgHeight);
+    setView({
+      scale: nextScale,
+      x: centered.x,
+      y: centered.y
+    });
+  }, [scheme.schemeNumber, svgWidth, svgHeight, viewportSize.width, viewportSize.height, minScale]);
+
+  function updateView(updater) {
+    setView((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      return clampTransform(next.scale, next.x, next.y, viewportSize.width, viewportSize.height, svgWidth, svgHeight);
+    });
+  }
+
+  function zoomAt(clientX, clientY, scaleFactor) {
+    if (!viewportRef.current || !viewportSize.width) {
+      return;
+    }
+
+    const rect = viewportRef.current.getBoundingClientRect();
+    const pointX = clientX - rect.left;
+    const pointY = clientY - rect.top;
+
+    updateView((current) => {
+      const nextScale = Math.max(minScale, Math.min(maxScale, current.scale * scaleFactor));
+      const scaleRatio = nextScale / current.scale;
+      const nextX = pointX - (pointX - current.x) * scaleRatio;
+      const nextY = pointY - (pointY - current.y) * scaleRatio;
+
+      return {
+        scale: nextScale,
+        x: nextX,
+        y: nextY
+      };
+    });
+  }
+
+  function resetView() {
+    if (!viewportSize.width) {
+      return;
+    }
+
+    const centered = clampTransform(minScale, 0, 0, viewportSize.width, viewportSize.height, svgWidth, svgHeight);
+    setView({
+      scale: minScale,
+      x: centered.x,
+      y: centered.y
+    });
+  }
+
+  function handleWheel(event) {
+    event.preventDefault();
+    const scaleFactor = event.deltaY < 0 ? 1.1 : 0.9;
+    zoomAt(event.clientX, event.clientY, scaleFactor);
+  }
+
+  function handlePointerDown(event) {
+    if (!viewportRef.current) {
+      return;
+    }
+
+    try {
+      if (typeof viewportRef.current.setPointerCapture === "function") {
+        viewportRef.current.setPointerCapture(event.pointerId);
+      }
+    } catch {
+      // Ignore pointer capture issues in browsers that partially support it.
+    }
+
+    const pinchState = pinchStateRef.current;
+    pinchState.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+    if (pinchState.pointers.size === 2) {
+      const [first, second] = [...pinchState.pointers.values()];
+      pinchState.startDistance = Math.hypot(second.x - first.x, second.y - first.y);
+      pinchState.startScale = viewRef.current.scale;
+      pinchState.startX = viewRef.current.x;
+      pinchState.startY = viewRef.current.y;
+      pinchState.centerX = (first.x + second.x) / 2;
+      pinchState.centerY = (first.y + second.y) / 2;
+      return;
+    }
+
+    pointerStateRef.current = {
+      activePointerId: event.pointerId,
+      dragStartX: event.clientX,
+      dragStartY: event.clientY,
+      originX: viewRef.current.x,
+      originY: viewRef.current.y
+    };
+  }
+
+  function handlePointerMove(event) {
+    const pinchState = pinchStateRef.current;
+
+    if (pinchState.pointers.has(event.pointerId)) {
+      pinchState.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
+
+    if (pinchState.pointers.size === 2) {
+      const [first, second] = [...pinchState.pointers.values()];
+      const distance = Math.hypot(second.x - first.x, second.y - first.y);
+
+      if (!pinchState.startDistance) {
+        return;
+      }
+
+      const rect = viewportRef.current.getBoundingClientRect();
+      const centerX = pinchState.centerX - rect.left;
+      const centerY = pinchState.centerY - rect.top;
+      const nextScale = Math.max(minScale, Math.min(maxScale, pinchState.startScale * (distance / pinchState.startDistance)));
+      const scaleRatio = nextScale / pinchState.startScale;
+
+      updateView({
+        scale: nextScale,
+        x: centerX - (centerX - pinchState.startX) * scaleRatio,
+        y: centerY - (centerY - pinchState.startY) * scaleRatio
+      });
+      return;
+    }
+
+    if (pointerStateRef.current.activePointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - pointerStateRef.current.dragStartX;
+    const deltaY = event.clientY - pointerStateRef.current.dragStartY;
+
+    updateView({
+      scale: viewRef.current.scale,
+      x: pointerStateRef.current.originX + deltaX,
+      y: pointerStateRef.current.originY + deltaY
+    });
+  }
+
+  function handlePointerUp(event) {
+    try {
+      if (viewportRef.current && typeof viewportRef.current.releasePointerCapture === "function") {
+        viewportRef.current.releasePointerCapture(event.pointerId);
+      }
+    } catch {
+      // Ignore capture release issues.
+    }
+
+    pinchStateRef.current.pointers.delete(event.pointerId);
+
+    if (pointerStateRef.current.activePointerId === event.pointerId) {
+      pointerStateRef.current.activePointerId = null;
+    }
+
+    if (pinchStateRef.current.pointers.size < 2) {
+      pinchStateRef.current.startDistance = 0;
+    }
+  }
 
   return (
     <Div className="board-card">
@@ -235,14 +480,45 @@ export function BoardScheme({ scheme, materialLength, cutWidth, lengthUnit }) {
         </Caption>
       </div>
 
-      <div className="board-track">
-        <svg
-          width={svgWidth}
-          height={svgHeight}
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          role="img"
-          aria-label={`Схема ${scheme.schemeNumber}`}
+      <div className="board-toolbar">
+        <Text className="muted-text">Масштаб: {view.scale.toFixed(2)}x</Text>
+        <div className="compact-actions">
+          <button className="board-toolbar__button" type="button" onClick={() => updateView((current) => ({ ...current, scale: Math.max(minScale, current.scale / 1.15) }))}>
+            -
+          </button>
+          <button className="board-toolbar__button" type="button" onClick={() => updateView((current) => ({ ...current, scale: Math.min(maxScale, current.scale * 1.15) }))}>
+            +
+          </button>
+          <button className="board-toolbar__button" type="button" onClick={resetView}>
+            Сброс
+          </button>
+        </div>
+      </div>
+
+      <div
+        ref={viewportRef}
+        className="board-viewport"
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+      >
+        <div
+          className="board-canvas"
+          style={{
+            width: `${svgWidth}px`,
+            height: `${svgHeight}px`,
+            transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`
+          }}
         >
+          <svg
+            width={svgWidth}
+            height={svgHeight}
+            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+            role="img"
+            aria-label={`Схема ${scheme.schemeNumber}`}
+          >
           <rect x={barX} y={barY} width={totalWidth} height={barHeight} fill="#ecead9" stroke="#64686c" strokeWidth="1" />
 
           {displayGroups.map((group, index) => {
@@ -311,16 +587,17 @@ export function BoardScheme({ scheme, materialLength, cutWidth, lengthUnit }) {
             );
           })}
 
-          <line x1={barEndX} y1={barY + barHeight + 2} x2={barEndX} y2={rulerBaseY + 4} stroke={RULER_LINE_COLOR} strokeDasharray="4 3" />
-          <text x={barEndX} y={rulerBaseY + 18} textAnchor="end" fontSize="13" fill={RULER_TEXT_COLOR}>
-            {formatLength(materialLength, lengthUnit)}
-          </text>
-        </svg>
+            <line x1={barEndX} y1={barY + barHeight + 2} x2={barEndX} y2={rulerBaseY + 4} stroke={RULER_LINE_COLOR} strokeDasharray="4 3" />
+            <text x={barEndX} y={rulerBaseY + 18} textAnchor="end" fontSize="13" fill={RULER_TEXT_COLOR}>
+              {formatLength(materialLength, lengthUnit)}
+            </text>
+          </svg>
+        </div>
       </div>
 
       <Footnote>
-        Пропил: {formatLength(cutWidth, lengthUnit)}. Снизу показаны размеры от нуля до каждого реза. Серый сегмент
-        справа показывает остаток заготовки.
+        Пропил: {formatLength(cutWidth, lengthUnit)}. Колесо мыши и тачпад меняют масштаб, перетаскивание двигает
+        схему, на смартфоне работают drag и pinch-to-zoom.
       </Footnote>
 
       <div className="scheme-text-block">

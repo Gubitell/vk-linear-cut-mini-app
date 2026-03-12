@@ -96,8 +96,51 @@ body {
 .board-track {
   display: block;
   width: 100%;
-  overflow-x: auto;
   padding-bottom: 8px;
+}
+
+.board-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.board-toolbar__button {
+  min-width: 36px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #5f6670;
+  border-radius: 8px;
+  background: #1d1f23;
+  color: #fff;
+  cursor: pointer;
+}
+
+.board-viewport {
+  position: relative;
+  width: 100%;
+  height: 300px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.board-viewport:active {
+  cursor: grabbing;
+}
+
+.board-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 .scheme-text-block {

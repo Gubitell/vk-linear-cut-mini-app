@@ -183,7 +183,8 @@ function buildGraphicTable(scheme, blank, maxWidth) {
         alignment: "center",
         fillColor: colors[index % colors.length],
         color: "#111111",
-        margin: [4, 8, 4, 8]
+        fontSize: 7,
+        margin: [2, 6, 2, 6]
       };
     })
   ];
@@ -197,7 +198,11 @@ function buildGraphicTable(scheme, blank, maxWidth) {
       hLineWidth: () => 1,
       vLineWidth: () => 1,
       hLineColor: () => "#64686c",
-      vLineColor: () => "#64686c"
+      vLineColor: () => "#64686c",
+      paddingLeft: () => 2,
+      paddingRight: () => 2,
+      paddingTop: () => 2,
+      paddingBottom: () => 2
     }
   };
 }
@@ -233,6 +238,7 @@ export function downloadTxtExport({ projectName, blank, schemes, includeZeroDime
 export function downloadPdfExport({ projectName, blank, schemes, includeZeroDimensions, orientation }) {
   ensurePdfFonts();
   const graphicWidth = orientation === "landscape" ? 740 : 500;
+  const pageMargins = [24, 24, 24, 24];
 
   const content = [
     { text: projectName || "Раскрой", style: "title" },
@@ -271,7 +277,7 @@ export function downloadPdfExport({ projectName, blank, schemes, includeZeroDime
     .createPdf({
       pageOrientation: orientation,
       pageSize: "A4",
-      pageMargins: [24, 24, 24, 24],
+      pageMargins,
       defaultStyle: {
         font: "Roboto",
         fontSize: 10

@@ -600,18 +600,15 @@ export default function App() {
               </Div>
             </Group>
 
-            <Group
-              header={
-                <div className="section-title-row">
-                  <Header>Заготовки проекта</Header>
-                  {projectBlanks.length > 0 ? (
-                    <Button size="s" mode="tertiary" appearance="negative" onClick={clearAllProjectBlanks}>
-                      Очистить всё
-                    </Button>
-                  ) : null}
-                </div>
-              }
-            >
+            <Group>
+              <div className="section-title-row">
+                <Header>Заготовки проекта</Header>
+                {projectBlanks.length > 0 ? (
+                  <Button size="s" mode="tertiary" appearance="negative" onClick={clearAllProjectBlanks}>
+                    Очистить всё
+                  </Button>
+                ) : null}
+              </div>
               {projectBlanks.length === 0 ? (
                 <Placeholder>Добавь первую заготовку в проект. После этого для каждой можно вести свой раскрой.</Placeholder>
               ) : (
@@ -708,18 +705,15 @@ export default function App() {
                   </Div>
                 </Group>
 
-                <Group
-                  header={
-                    <div className="section-title-row">
-                      <Header>Текущий список</Header>
-                      {sortedDetails.length > 0 ? (
-                        <Button size="s" mode="tertiary" appearance="negative" onClick={clearAllDetails}>
-                          Очистить всё
-                        </Button>
-                      ) : null}
-                    </div>
-                  }
-                >
+                <Group>
+                  <div className="section-title-row">
+                    <Header>Текущий список</Header>
+                    {sortedDetails.length > 0 ? (
+                      <Button size="s" mode="tertiary" appearance="negative" onClick={clearAllDetails}>
+                        Очистить всё
+                      </Button>
+                    ) : null}
+                  </div>
                   {sortedDetails.length === 0 ? (
                     <Placeholder>Список пуст. Добавь детали вручную.</Placeholder>
                   ) : (
