@@ -11,7 +11,10 @@ function ensurePdfFonts() {
 }
 
 function formatNumber(value) {
-  return Number(value).toLocaleString("ru-RU");
+  return new Intl.NumberFormat("ru-RU", {
+    useGrouping: false,
+    maximumFractionDigits: 10
+  }).format(Number(value));
 }
 
 function formatLength(value, unit) {
@@ -119,10 +122,55 @@ function makeSafeFilename(value) {
   return (value || "raskroy").replace(/[^\wа-яА-Я.-]+/g, "_");
 }
 
-function buildGraphicTable(scheme, blank) {
+function fitWidths(rawWidths, maxWidth, minWidth = 26) {
+  if (rawWidths.length === 0) {
+    return [];
+  }
+
+  const total = rawWidths.reduce((sum, width) => sum + width, 0) || 1;
+  let widths = rawWidths.map((width) => (width / total) * maxWidth);
+
+  if (widths.every((width) => width >= minWidth)) {
+    return widths;
+  }
+
+  const constrained = widths.map((width) => Math.max(width, minWidth));
+  const constrainedTotal = constrained.reduce((sum, width) => sum + width, 0);
+
+  if (constrainedTotal <= maxWidth) {
+    return constrained;
+  }
+
+  if (rawWidths.length * minWidth >= maxWidth) {
+    return rawWidths.map(() => maxWidth / rawWidths.length);
+  }
+
+  const freeIndexes = [];
+  let reservedWidth = 0;
+
+  constrained.forEach((width, index) => {
+    if (width === minWidth) {
+      reservedWidth += minWidth;
+    } else {
+      freeIndexes.push(index);
+    }
+  });
+
+  const freeWidth = maxWidth - reservedWidth;
+  const freeRawTotal = freeIndexes.reduce((sum, index) => sum + rawWidths[index], 0) || 1;
+
+  widths = constrained.map((width, index) =>
+    freeIndexes.includes(index) ? (rawWidths[index] / freeRawTotal) * freeWidth : width
+  );
+
+  return widths;
+}
+
+function buildGraphicTable(scheme, blank, maxWidth) {
   const { groups } = groupConsecutivePieces(scheme.representativeBoard.pieces, Number(blank.cutWidth || 0));
   const colors = ["#2688eb", "#4bb34b", "#ff9f1a", "#8f3ffd", "#e64646", "#33b5e5"];
-  const widths = groups.map((group) => Math.max(group.length * group.count + blank.cutWidth * Math.max(group.count - 1, 0), 60));
+  const rawWidths = groups.map((group) => Math.max(group.length * group.count + blank.cutWidth * Math.max(group.count - 1, 0), 1));
+  const widths = fitWidths(rawWidths, maxWidth);
   const body = [
     groups.map((group, index) => {
       const pieceLabel =
@@ -184,6 +232,7 @@ export function downloadTxtExport({ projectName, blank, schemes, includeZeroDime
 
 export function downloadPdfExport({ projectName, blank, schemes, includeZeroDimensions, orientation }) {
   ensurePdfFonts();
+  const graphicWidth = orientation === "landscape" ? 740 : 500;
 
   const content = [
     { text: projectName || "Раскрой", style: "title" },
@@ -205,7 +254,7 @@ export function downloadPdfExport({ projectName, blank, schemes, includeZeroDime
       )}`,
       margin: [0, 0, 0, 8]
     });
-    content.push(buildGraphicTable(scheme, blank));
+    content.push(buildGraphicTable(scheme, blank, graphicWidth));
     content.push({ text: getSchemeTextLine(scheme, blank), margin: [0, 8, 0, 0] });
 
     if (includeZeroDimensions) {

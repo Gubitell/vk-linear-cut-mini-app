@@ -54,7 +54,10 @@ function generateId() {
 }
 
 function formatNumber(value) {
-  return Number(value).toLocaleString("ru-RU");
+  return new Intl.NumberFormat("ru-RU", {
+    useGrouping: false,
+    maximumFractionDigits: 10
+  }).format(Number(value));
 }
 
 function formatDate(value) {
@@ -320,6 +323,14 @@ export default function App() {
     });
 
     setStatusText("Заготовка удалена из проекта");
+  }
+
+  function clearAllProjectBlanks() {
+    setProjectBlanks([]);
+    setActiveBlankId(null);
+    setBlankForm(EMPTY_BLANK_FORM);
+    setDetailForm(EMPTY_DETAIL_FORM);
+    setStatusText("Все заготовки проекта удалены");
   }
 
   function addTemplateToProject(template) {
@@ -589,7 +600,18 @@ export default function App() {
               </Div>
             </Group>
 
-            <Group header={<Header>Заготовки проекта</Header>}>
+            <Group
+              header={
+                <div className="section-title-row">
+                  <Header>Заготовки проекта</Header>
+                  {projectBlanks.length > 0 ? (
+                    <Button size="s" mode="tertiary" appearance="negative" onClick={clearAllProjectBlanks}>
+                      Очистить всё
+                    </Button>
+                  ) : null}
+                </div>
+              }
+            >
               {projectBlanks.length === 0 ? (
                 <Placeholder>Добавь первую заготовку в проект. После этого для каждой можно вести свой раскрой.</Placeholder>
               ) : (

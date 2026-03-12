@@ -9,7 +9,10 @@ const RULER_LINE_COLOR = "#8e949a";
 const RULER_GAP_BEFORE_MARKER = 14;
 
 function formatNumber(value) {
-  return Number(value).toLocaleString("ru-RU");
+  return new Intl.NumberFormat("ru-RU", {
+    useGrouping: false,
+    maximumFractionDigits: 10
+  }).format(Number(value));
 }
 
 function formatLength(value, unit) {
