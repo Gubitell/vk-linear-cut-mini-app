@@ -1,5 +1,6 @@
 import pdfMake from "pdfmake/build/pdfmake";
 import pdfFonts from "pdfmake/build/vfs_fonts";
+import { copyText, isVkWebView } from "./vk.js";
 
 function ensurePdfFonts() {
   if (typeof pdfMake.addVirtualFileSystem === "function") {
@@ -169,25 +170,52 @@ function fitWidths(rawWidths, maxWidth, minWidth = 26) {
 function buildGraphicTable(scheme, blank, maxWidth) {
   const { groups } = groupConsecutivePieces(scheme.representativeBoard.pieces, Number(blank.cutWidth || 0));
   const colors = ["#2688eb", "#4bb34b", "#ff9f1a", "#8f3ffd", "#e64646", "#33b5e5"];
-  const rawWidths = groups.map((group) => Math.max(group.length * group.count + blank.cutWidth * Math.max(group.count - 1, 0), 1));
-  const widths = fitWidths(rawWidths, maxWidth);
-  const body = [
-    groups.map((group, index) => {
-      const pieceLabel =
-        group.startPieceNumber === group.endPieceNumber ? `№${group.startPieceNumber}` : `№${group.startPieceNumber}-${group.endPieceNumber}`;
-      const lengthLabel =
-        group.count > 1 ? `${formatNumber(group.length)} ${blank.lengthUnit} (x${group.count})` : `${formatNumber(group.length)} ${blank.lengthUnit}`;
 
-      return {
-        text: `${pieceLabel}\n${lengthLabel}`,
-        alignment: "center",
-        fillColor: colors[index % colors.length],
-        color: "#111111",
-        fontSize: 7,
-        margin: [2, 6, 2, 6]
-      };
-    })
-  ];
+  const rawWidths = [];
+
+  groups.forEach((group) => {
+    const segmentLength = group.length * group.count + blank.cutWidth * Math.max(group.count - 1, 0);
+    rawWidths.push(Math.max(segmentLength, 1));
+  });
+
+  const wasteLength = Math.max(blank.length - scheme.representativeBoard.usedLength, 0);
+
+  if (wasteLength > 0) {
+    rawWidths.push(Math.max(wasteLength, 1));
+  }
+
+  const widths = fitWidths(rawWidths, maxWidth);
+
+  const row = [];
+
+  groups.forEach((group, index) => {
+    const pieceLabel =
+      group.startPieceNumber === group.endPieceNumber ? `№${group.startPieceNumber}` : `№${group.startPieceNumber}-${group.endPieceNumber}`;
+    const lengthLabel =
+      group.count > 1 ? `${formatNumber(group.length)} ${blank.lengthUnit} (x${group.count})` : `${formatNumber(group.length)} ${blank.lengthUnit}`;
+
+    row.push({
+      text: `${pieceLabel}\n${lengthLabel}`,
+      alignment: "center",
+      fillColor: colors[index % colors.length],
+      color: "#111111",
+      fontSize: 7,
+      margin: [2, 6, 2, 6]
+    });
+  });
+
+  if (wasteLength > 0) {
+    row.push({
+      text: `Остаток\n${formatLength(wasteLength, blank.lengthUnit)}`,
+      alignment: "center",
+      fillColor: "#f2f3f5",
+      color: "#111111",
+      fontSize: 7,
+      margin: [2, 6, 2, 6]
+    });
+  }
+
+  const body = [row];
 
   return {
     table: {
@@ -207,7 +235,7 @@ function buildGraphicTable(scheme, blank, maxWidth) {
   };
 }
 
-export function downloadTxtExport({ projectName, blank, schemes, includeZeroDimensions }) {
+export async function downloadTxtExport({ projectName, blank, schemes, includeZeroDimensions }) {
   const lines = [
     projectName || "Раскрой",
     `Заготовка: ${blank.name}`,
@@ -232,10 +260,29 @@ export function downloadTxtExport({ projectName, blank, schemes, includeZeroDime
     }
   });
 
-  saveBlob(`${makeSafeFilename(`${projectName}_${blank.name}`)}.txt`, "text/plain;charset=utf-8", lines.join("\n"));
+  const text = lines.join("\n");
+  const filename = `${makeSafeFilename(`${projectName}_${blank.name}`)}.txt`;
+
+  if (isVkWebView()) {
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({
+          title: filename,
+          text
+        });
+        return { statusMessage: "TXT отправлен в общий доступ" };
+      } catch {
+        // fallback: copy
+      }
+    }
+    await copyText(text);
+    return { statusMessage: "Текст скопирован в буфер" };
+  }
+
+  saveBlob(filename, "text/plain;charset=utf-8", text);
 }
 
-export function downloadPdfExport({ projectName, blank, schemes, includeZeroDimensions, orientation }) {
+export async function downloadPdfExport({ projectName, blank, schemes, includeZeroDimensions, orientation }) {
   ensurePdfFonts();
   const graphicWidth = orientation === "landscape" ? 740 : 500;
   const pageMargins = [24, 24, 24, 24];
@@ -273,32 +320,56 @@ export function downloadPdfExport({ projectName, blank, schemes, includeZeroDime
     }
   });
 
-  pdfMake
-    .createPdf({
-      pageOrientation: orientation,
-      pageSize: "A4",
-      pageMargins,
-      defaultStyle: {
-        font: "Roboto",
-        fontSize: 10
+  const docDefinition = {
+    pageOrientation: orientation,
+    pageSize: "A4",
+    pageMargins,
+    defaultStyle: {
+      font: "Roboto",
+      fontSize: 10
+    },
+    styles: {
+      title: {
+        fontSize: 18,
+        bold: true
       },
-      styles: {
-        title: {
-          fontSize: 18,
-          bold: true
-        },
-        subtitle: {
-          fontSize: 12,
-          bold: true,
-          margin: [0, 4, 0, 6]
-        },
-        section: {
-          fontSize: 12,
-          bold: true,
-          margin: [0, 12, 0, 6]
-        }
+      subtitle: {
+        fontSize: 12,
+        bold: true,
+        margin: [0, 4, 0, 6]
       },
-      content
-    })
-    .download(`${makeSafeFilename(`${projectName}_${blank.name}`)}.pdf`);
+      section: {
+        fontSize: 12,
+        bold: true,
+        margin: [0, 12, 0, 6]
+      }
+    },
+    content
+  };
+
+  const filename = `${makeSafeFilename(`${projectName}_${blank.name}`)}.pdf`;
+  const pdfMessage = "PDF можно скачать только через веб-браузер.";
+
+  if (isVkWebView()) {
+    const pdf = pdfMake.createPdf(docDefinition);
+    try {
+      const blob = await new Promise((resolve, reject) => {
+        pdf.getBlob((b) => resolve(b), reject);
+      });
+      const file = new File([blob], filename, { type: "application/pdf" });
+      if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: projectName || "Раскрой"
+        });
+        return { statusMessage: "PDF отправлен в общий доступ" };
+      }
+    } catch {
+      // share not supported or user cancelled
+    }
+    return { statusMessage: pdfMessage };
+  }
+
+  const pdf = pdfMake.createPdf(docDefinition);
+  pdf.download(filename);
 }

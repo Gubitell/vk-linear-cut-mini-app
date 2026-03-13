@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Badge,
   Button,
@@ -28,7 +28,7 @@ import { BoardScheme } from "./components/BoardScheme.jsx";
 import { downloadPdfExport, downloadTxtExport } from "./lib/export.js";
 import { calculateCutting, normalizeDetails } from "./lib/optimizer.js";
 import { deleteMaterialTemplate, loadHistory, loadMaterialTemplates, saveHistoryEntry, saveMaterialTemplate } from "./lib/storage.js";
-import { getUserInfoSafe, setSwipeSettings } from "./lib/vk.js";
+import { getUserInfoSafe, isVkWebView, setSwipeSettings } from "./lib/vk.js";
 
 const EMPTY_PROJECT_NAME = "Новый проект";
 const EMPTY_BLANK_FORM = {
@@ -208,11 +208,24 @@ export default function App() {
   const [detailForm, setDetailForm] = useState(EMPTY_DETAIL_FORM);
   const [historyItems, setHistoryItems] = useState([]);
   const [customTemplates, setCustomTemplates] = useState([]);
-  const [statusText, setStatusText] = useState("Готов к расчёту");
+  const DEFAULT_STATUS = "Готов к расчёту";
+  const [statusText, setStatusText] = useState(DEFAULT_STATUS);
   const [exportIncludeZero, setExportIncludeZero] = useState(true);
   const [pdfOrientation, setPdfOrientation] = useState("landscape");
+  const statusTimeoutRef = useRef(null);
 
   const activePanel = historyStack[historyStack.length - 1];
+
+  function showStatus(message) {
+    if (statusTimeoutRef.current) {
+      clearTimeout(statusTimeoutRef.current);
+    }
+    setStatusText(message);
+    statusTimeoutRef.current = setTimeout(() => {
+      setStatusText(DEFAULT_STATUS);
+      statusTimeoutRef.current = null;
+    }, 3000);
+  }
 
   useEffect(() => {
     getUserInfoSafe().then((data) => {
@@ -228,6 +241,12 @@ export default function App() {
   useEffect(() => {
     setSwipeSettings(historyStack.length === 1);
   }, [historyStack.length]);
+
+  useEffect(() => {
+    return () => {
+      if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
+    };
+  }, []);
 
   const activeBlank = useMemo(
     () => projectBlanks.find((blank) => blank.id === activeBlankId) ?? null,
@@ -251,7 +270,7 @@ export default function App() {
     setProjectBlanks([]);
     setActiveBlankId(null);
     setDetailForm(EMPTY_DETAIL_FORM);
-    setStatusText("Новый проект");
+    showStatus("Новый проект");
     setHistoryStack(["home"]);
   }
 
@@ -261,14 +280,14 @@ export default function App() {
       ...EMPTY_BLANK_FORM,
       name: `Заготовка ${projectBlanks.length + 1}`
     });
-    setStatusText("Черновик новой заготовки");
+    showStatus("Черновик новой заготовки");
   }
 
   function saveBlankToProject() {
     const sanitizedBlank = sanitizeBlank(blankForm);
 
     if (!Number.isFinite(sanitizedBlank.length) || sanitizedBlank.length <= 0) {
-      setStatusText("Длина заготовки должна быть больше 0");
+      showStatus("Длина заготовки должна быть больше 0");
       return;
     }
 
@@ -294,7 +313,7 @@ export default function App() {
       return [...prev, created];
     });
 
-    setStatusText(activeBlankId ? "Заготовка обновлена" : "Заготовка добавлена в проект");
+    showStatus(activeBlankId ? "Заготовка обновлена" : "Заготовка добавлена в проект");
   }
 
   function activateBlank(blankId) {
@@ -306,7 +325,7 @@ export default function App() {
 
     setActiveBlankId(blank.id);
     setBlankForm(normalizeBlankState(blank));
-    setStatusText(`Выбрана заготовка: ${blank.name}`);
+    showStatus(`Выбрана заготовка: ${blank.name}`);
   }
 
   function deleteProjectBlank(blankId) {
@@ -322,7 +341,7 @@ export default function App() {
       return next;
     });
 
-    setStatusText("Заготовка удалена из проекта");
+    showStatus("Заготовка удалена из проекта");
   }
 
   function clearAllProjectBlanks() {
@@ -330,7 +349,7 @@ export default function App() {
     setActiveBlankId(null);
     setBlankForm(EMPTY_BLANK_FORM);
     setDetailForm(EMPTY_DETAIL_FORM);
-    setStatusText("Все заготовки проекта удалены");
+    showStatus("Все заготовки проекта удалены");
   }
 
   function addTemplateToProject(template) {
@@ -344,7 +363,7 @@ export default function App() {
     setProjectBlanks((prev) => [...prev, created]);
     setActiveBlankId(created.id);
     setBlankForm(normalizeBlankState(created));
-    setStatusText(`Шаблон добавлен в проект: ${created.name}`);
+    showStatus(`Шаблон добавлен в проект: ${created.name}`);
   }
 
   async function saveCurrentBlankAsTemplate() {
@@ -352,14 +371,14 @@ export default function App() {
     const nextTemplates = await saveMaterialTemplate(template);
 
     setCustomTemplates(nextTemplates);
-    setStatusText(`Шаблон сохранён: ${template.title}`);
+    showStatus(`Шаблон сохранён: ${template.title}`);
   }
 
   async function removeMaterialTemplate(templateId) {
     const nextTemplates = await deleteMaterialTemplate(templateId);
 
     setCustomTemplates(nextTemplates);
-    setStatusText("Шаблон заготовки удалён");
+    showStatus("Шаблон заготовки удалён");
   }
 
   function updateActiveBlank(updater) {
@@ -370,7 +389,7 @@ export default function App() {
 
   function appendDetail() {
     if (!activeBlank) {
-      setStatusText("Сначала сохрани или выбери заготовку");
+      showStatus("Сначала сохрани или выбери заготовку");
       return;
     }
 
@@ -378,17 +397,17 @@ export default function App() {
     const quantity = Number(detailForm.quantity);
 
     if (!Number.isFinite(length) || length <= 0) {
-      setStatusText("Длина детали должна быть больше 0");
+      showStatus("Длина детали должна быть больше 0");
       return;
     }
 
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      setStatusText("Количество должно быть больше 0");
+      showStatus("Количество должно быть больше 0");
       return;
     }
 
     if (length > activeBlank.length) {
-      setStatusText("Деталь длиннее выбранной заготовки");
+      showStatus("Деталь длиннее выбранной заготовки");
       return;
     }
 
@@ -398,7 +417,7 @@ export default function App() {
       result: null
     }));
     setDetailForm(EMPTY_DETAIL_FORM);
-    setStatusText(`Добавлена деталь ${length} ${activeBlank.lengthUnit} × ${quantity}`);
+    showStatus(`Добавлена деталь ${length} ${activeBlank.lengthUnit} × ${quantity}`);
   }
 
   function removeDetail(index) {
@@ -415,12 +434,12 @@ export default function App() {
       details: [],
       result: null
     }));
-    setStatusText("Все детали удалены");
+    showStatus("Все детали удалены");
   }
 
   function runCalculation() {
     if (!activeBlank) {
-      setStatusText("Сначала сохрани или выбери заготовку");
+      showStatus("Сначала сохрани или выбери заготовку");
       return;
     }
 
@@ -433,7 +452,7 @@ export default function App() {
     );
 
     if (calculation.error) {
-      setStatusText(calculation.error);
+      showStatus(calculation.error);
       return;
     }
 
@@ -441,7 +460,7 @@ export default function App() {
       ...blank,
       result: calculation
     }));
-    setStatusText("Расчёт готов");
+    showStatus("Расчёт готов");
     runTapticImpactOccurred("light");
     go("results");
   }
@@ -455,37 +474,37 @@ export default function App() {
     const nextHistory = await saveHistoryEntry(entry);
 
     setHistoryItems(nextHistory);
-    setStatusText(`Раскрой сохранён в историю: ${entry.projectLabel}`);
+    showStatus(`Раскрой сохранён в историю: ${entry.projectLabel}`);
     runTapticImpactOccurred("medium");
   }
 
-  function exportTxt() {
+  async function exportTxt() {
     if (!activeBlank || !activeBlank.result) {
       return;
     }
 
-    downloadTxtExport({
+    const result = await downloadTxtExport({
       projectName,
       blank: activeBlank,
       schemes: boardSchemes,
       includeZeroDimensions: exportIncludeZero
     });
-    setStatusText("TXT выгружен");
+    showStatus(result?.statusMessage ?? "TXT выгружен");
   }
 
-  function exportPdf() {
+  async function exportPdf() {
     if (!activeBlank || !activeBlank.result) {
       return;
     }
 
-    downloadPdfExport({
+    const result = await downloadPdfExport({
       projectName,
       blank: activeBlank,
       schemes: boardSchemes,
       includeZeroDimensions: exportIncludeZero,
       orientation: pdfOrientation
     });
-    setStatusText("PDF выгружен");
+    showStatus(result?.statusMessage ?? "PDF выгружен");
   }
 
   function openHistoryEntry(item) {
@@ -500,7 +519,7 @@ export default function App() {
     setProjectBlanks([restoredBlank]);
     setActiveBlankId(restoredBlank.id);
     setBlankForm(normalizeBlankState(restoredBlank));
-    setStatusText(`Открыт раскрой: ${item.projectLabel || restoredBlank.name}`);
+    showStatus(`Открыт раскрой: ${item.projectLabel || restoredBlank.name}`);
     setHistoryStack(["home", "results"]);
   }
 
@@ -770,6 +789,9 @@ export default function App() {
                       <Button size="m" onClick={saveCurrentCalculation}>
                         Сохранить в историю
                       </Button>
+                      <Button size="m" mode="secondary" onClick={() => setHistoryStack(["home"])}>
+                        На главную
+                      </Button>
                     </div>
                   </Div>
                 </Group>
@@ -780,25 +802,40 @@ export default function App() {
                       Включать размеры от нуля
                     </Checkbox>
                   </FormItem>
-                  <FormItem top="Ориентация PDF">
-                    <div className="compact-actions">
-                      <Button size="s" mode={pdfOrientation === "portrait" ? "primary" : "secondary"} onClick={() => setPdfOrientation("portrait")}>
-                        Вертикально
-                      </Button>
-                      <Button size="s" mode={pdfOrientation === "landscape" ? "primary" : "secondary"} onClick={() => setPdfOrientation("landscape")}>
-                        Горизонтально
-                      </Button>
-                    </div>
-                  </FormItem>
-                  <FormItem top="Файлы">
-                    <div className="compact-actions">
-                      <Button size="m" onClick={exportTxt}>
-                        Скачать TXT
-                      </Button>
-                      <Button size="m" mode="secondary" onClick={exportPdf}>
-                        Скачать PDF
-                      </Button>
-                    </div>
+                  {!isVkWebView() && (
+                    <FormItem top="Ориентация PDF">
+                      <div className="compact-actions">
+                        <Button size="s" mode={pdfOrientation === "portrait" ? "primary" : "secondary"} onClick={() => setPdfOrientation("portrait")}>
+                          Вертикально
+                        </Button>
+                        <Button size="s" mode={pdfOrientation === "landscape" ? "primary" : "secondary"} onClick={() => setPdfOrientation("landscape")}>
+                          Горизонтально
+                        </Button>
+                      </div>
+                    </FormItem>
+                  )}
+                  <FormItem top={isVkWebView() ? null : "Файлы"}>
+                    {isVkWebView() ? (
+                      <>
+                        <div className="compact-actions">
+                          <Button size="m" onClick={exportTxt}>
+                            Скопировать данные расчёта
+                          </Button>
+                        </div>
+                        <Text className="muted-text" style={{ display: "block", marginTop: 8 }}>
+                          Расчёт в PDF можно скачать только через веб-браузер.
+                        </Text>
+                      </>
+                    ) : (
+                      <div className="compact-actions">
+                        <Button size="m" onClick={exportTxt}>
+                          Скачать TXT
+                        </Button>
+                        <Button size="m" mode="secondary" onClick={exportPdf}>
+                          Скачать PDF
+                        </Button>
+                      </div>
+                    )}
                   </FormItem>
                 </Group>
 
