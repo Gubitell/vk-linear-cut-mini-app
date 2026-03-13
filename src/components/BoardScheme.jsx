@@ -307,6 +307,27 @@ export function BoardScheme({ scheme, materialLength, cutWidth, lengthUnit }) {
   }, []);
 
   useEffect(() => {
+    const node = viewportRef.current;
+
+    if (!node) {
+      return undefined;
+    }
+
+    const handleNativeWheel = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const scaleFactor = event.deltaY < 0 ? 1.1 : 0.9;
+      zoomAt(event.clientX, event.clientY, scaleFactor);
+    };
+
+    node.addEventListener("wheel", handleNativeWheel, { passive: false });
+
+    return () => {
+      node.removeEventListener("wheel", handleNativeWheel);
+    };
+  }, [minScale, maxScale, viewportSize.width, viewportSize.height, svgWidth, svgHeight]);
+
+  useEffect(() => {
     if (!viewportSize.width) {
       return;
     }
@@ -361,12 +382,6 @@ export function BoardScheme({ scheme, materialLength, cutWidth, lengthUnit }) {
       x: centered.x,
       y: centered.y
     });
-  }
-
-  function handleWheel(event) {
-    event.preventDefault();
-    const scaleFactor = event.deltaY < 0 ? 1.1 : 0.9;
-    zoomAt(event.clientX, event.clientY, scaleFactor);
   }
 
   function handlePointerDown(event) {
@@ -498,7 +513,6 @@ export function BoardScheme({ scheme, materialLength, cutWidth, lengthUnit }) {
       <div
         ref={viewportRef}
         className="board-viewport"
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
