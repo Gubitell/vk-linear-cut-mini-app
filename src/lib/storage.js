@@ -57,6 +57,15 @@ export async function saveHistoryEntry(entry) {
   return nextHistory;
 }
 
+export async function deleteHistoryEntry(entryId) {
+  const nextHistory = getLocalHistory().filter((item) => item.id !== entryId);
+
+  setLocalHistory(nextHistory);
+  await bridgeStorageSet(HISTORY_KEY, JSON.stringify(nextHistory));
+
+  return nextHistory;
+}
+
 function getLocalTemplates() {
   try {
     return parseHistory(window.localStorage.getItem(TEMPLATES_KEY));

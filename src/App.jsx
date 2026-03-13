@@ -27,7 +27,14 @@ import { runTapticImpactOccurred } from "@vkontakte/vk-bridge-react";
 import { BoardScheme } from "./components/BoardScheme.jsx";
 import { downloadPdfExport, downloadTxtExport } from "./lib/export.js";
 import { calculateCutting, normalizeDetails } from "./lib/optimizer.js";
-import { deleteMaterialTemplate, loadHistory, loadMaterialTemplates, saveHistoryEntry, saveMaterialTemplate } from "./lib/storage.js";
+import {
+  deleteHistoryEntry,
+  deleteMaterialTemplate,
+  loadHistory,
+  loadMaterialTemplates,
+  saveHistoryEntry,
+  saveMaterialTemplate
+} from "./lib/storage.js";
 import { getUserInfoSafe, isVkWebView, setSwipeSettings } from "./lib/vk.js";
 
 const EMPTY_PROJECT_NAME = "Новый проект";
@@ -478,6 +485,12 @@ export default function App() {
     runTapticImpactOccurred("medium");
   }
 
+  async function removeHistoryEntry(entryId) {
+    const nextHistory = await deleteHistoryEntry(entryId);
+    setHistoryItems(nextHistory);
+    showStatus("Запись удалена из истории");
+  }
+
   async function exportTxt() {
     if (!activeBlank || !activeBlank.result) {
       return;
@@ -873,9 +886,19 @@ export default function App() {
                     key={item.id}
                     subtitle={`${formatDate(item.savedAt)} • ${item.result.boardCount} заготовок • ${item.result.wastePercent}% отходов`}
                     after={
-                      <Button size="s" mode="secondary" onClick={() => openHistoryEntry(item)}>
-                        Открыть
-                      </Button>
+                      <div className="compact-actions">
+                        <Button size="s" mode="secondary" onClick={() => openHistoryEntry(item)}>
+                          Открыть
+                        </Button>
+                        <Button
+                          size="s"
+                          mode="tertiary"
+                          appearance="negative"
+                          onClick={() => removeHistoryEntry(item.id)}
+                        >
+                          Удалить
+                        </Button>
+                      </div>
                     }
                   >
                     {item.projectLabel || item.projectName}
